@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile and metadata in The Harbor",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "authorId": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string" },
+        "gender": { "type": "string" },
+        "favorites": { "type": "string" },
+        "country": { "type": "string" },
+        "emergencyNumber": { "type": "string" },
+        "emailVerified": { "type": "boolean" },
+        "isAdmin": { "type": "boolean" },
+        "isPublic": { "type": "boolean" },
+        "goldBalance": { "type": "integer" },
+        "goldReceived": { "type": "integer" },
+        "goldGiven": { "type": "integer" },
+        "followers": { "type": "array" },
+        "following": { "type": "array" },
+        "storyCount": { "type": "integer" },
+        "commentCount": { "type": "integer" },
+        "likesReceived": { "type": "integer" },
+        "language": { "type": "string" },
+        "avatar": { "type": "string" },
+        "border": { "type": "string" },
+        "birthday": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastActive": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email"]
+    },
+    "Bookmark": {
+      "title": "Bookmark",
+      "description": "A bookmarked story for a user",
+      "type": "object",
+      "properties": {
+        "storyId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["storyId", "timestamp"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "An anonymous story shared by a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 100 },
+        "content": { "type": "string" },
+        "category": { "type": "string" },
+        "userId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "approved": { "type": "boolean" },
+        "visibility": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "views": { "type": "integer" }
+      },
+      "required": ["title", "content", "userId"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "users/{userId}/bookmarks/{bookmarkId}": {
+      "schema": "Bookmark",
+      "description": "User bookmarks for stories"
+    },
+    "stories/{storyId}": {
+      "schema": "Story",
+      "description": "Stories shared on the platform"
+    }
+  }
+}

@@ -1,0 +1,253 @@
+/* ═══════════════════════════════════════════════════════════════
+   The Harbor — Donate Page Styles
+   ═══════════════════════════════════════════════════════════════ */
+
+.donate-container {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+/* --- Grid System --- */
+.grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.grid-cols-1 {
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+@media (min-width: 640px) {
+  .sm\:grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .md\:grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .lg\:grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* --- Tiers Cards --- */
+.tier-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+  padding: 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 240px;
+  transition: transform 0.25s var(--ease-smooth), border-color 0.25s var(--ease-smooth), box-shadow 0.25s var(--ease-smooth);
+}
+
+.tier-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--color-primary-light);
+  box-shadow: var(--shadow-md);
+}
+
+.tier-card.selected {
+  border-color: var(--color-primary);
+  background: rgba(16, 185, 129, 0.04);
+  box-shadow: 0 0 0 2px var(--color-primary-light);
+}
+
+.tier-card .badge-popular {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--color-warning);
+  font-size: 0.625rem;
+  font-weight: 900;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  letter-spacing: 0.05em;
+}
+
+/* --- Custom Contribution Box --- */
+.custom-donation-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+  padding: 1.5rem;
+  max-width: 24rem;
+  margin: 1.5rem auto;
+  text-align: center;
+}
+
+.custom-donation-input-wrapper {
+  position: relative;
+  max-width: 15rem;
+  margin: 0 auto;
+}
+
+.custom-donation-currency {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+#custom-donation {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 0.75rem 1rem 0.75rem 2rem;
+  text-align: center;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text-primary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+#custom-donation:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+  outline: none;
+}
+
+/* --- Payoneer Checkout Button --- */
+#payoneer-donate-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary);
+  color: #ffffff;
+  font-weight: 700;
+  font-family: inherit;
+  padding: 1rem 2rem;
+  border-radius: var(--radius-full);
+  border: none;
+  font-size: 1rem;
+  gap: 0.5rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-primary);
+  transition: transform 0.2s var(--ease-smooth), background 0.2s var(--ease-smooth), filter 0.2s var(--ease-smooth);
+}
+
+#payoneer-donate-btn:hover {
+  background: var(--color-primary-light);
+  transform: scale(1.02);
+}
+
+#payoneer-donate-btn:active {
+  transform: scale(0.98);
+}
+
+/* --- Trust Signals Section --- */
+.trust-signals {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  padding: 2rem 0;
+  margin: 3rem 0;
+}
+
+.trust-signal-item {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.trust-signal-icon {
+  font-size: 1.75rem;
+}
+
+.trust-signal-title {
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.trust-signal-desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  max-width: 10rem;
+  line-height: 1.4;
+}
+
+/* --- Accordion FAQ Section --- */
+.faq-section {
+  margin-top: 3rem;
+}
+
+.faq-title {
+  font-size: 1.125rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  border-b: 1px solid var(--color-border);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.faq-item {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.faq-item[open] {
+  border-color: var(--color-border);
+}
+
+.faq-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  user-select: none;
+  list-style: none;
+}
+
+.faq-summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-summary-icon {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  transition: transform 0.2s var(--ease-smooth);
+}
+
+.faq-item[open] .faq-summary-icon {
+  transform: rotate(180deg);
+}
+
+.faq-content {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.75rem;
+  line-height: 1.5;
+}
+
+/* --- Typography Helpers --- */
+.heading-gradient {
+  background: linear-gradient(135deg, #ffffff 0%, var(--text-muted) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

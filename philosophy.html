@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en" class="dark-theme">
+<head>`n  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="description" content="Discover the philosophy, heart, and driving vision behind the creation of The Harbor." />
+  <meta name="theme-color" content="#1a4a4a" />
+  <link rel="manifest" href="manifest.json" />
+  <title>Philosophy — The Harbor</title>
+  <link rel="stylesheet" href="src/css/theme.css">
+  <link rel="stylesheet" href="src/css/base.css">
+  <link rel="stylesheet" href="src/css/pages/pages-common.css">
+  <link rel="stylesheet" href="src/css/pages/static.css">
+</head>
+<body class="app-shell">
+  <div class="app-shell__bg" aria-hidden="true"></div>
+  <app-loading-screen></app-loading-screen>
+  <app-navigation></app-navigation>
+  <main class="app-shell__main page page--wide" id="main-content" role="main">
+    <button class="page-back" id="back-btn" type="button">← Back</button>
+    <div id="static-content"></div>
+  </main>
+  <app-footer></app-footer>
+  <app-auth-modal></app-auth-modal>
+  <app-confirm-modal></app-confirm-modal>
+  <app-toast-host></app-toast-host>
+  <script type="module" src="src/js/shell.js"></script>
+  <script type="module" src="src/js/pages/static.js"></script>
+</body>
+</html>
+

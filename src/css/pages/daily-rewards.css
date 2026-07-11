@@ -1,0 +1,135 @@
+.rewards-hero {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+  color: #fff;
+  padding: 2rem;
+  border-radius: var(--radius-2xl);
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(16, 185, 129, 0.2);
+  position: relative;
+  min-height: 18rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+}
+.rewards-hero__icon { font-size: 3.5rem; display: block; margin-bottom: var(--space-md); animation: bounceSlow 3s ease-in-out infinite; }
+.rewards-hero h1 { font-size: var(--text-xl); font-weight: 900; margin: 0; }
+.rewards-hero p { font-size: var(--text-xs); opacity: 0.85; max-width: 18rem; margin: 0.25rem auto 0; }
+.rewards-streak-box { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: var(--radius-xl); padding: 0.75rem 1.25rem; margin: var(--space-md) auto; max-width: 16rem; width: 100%; }
+.rewards-streak-label { font-size: 0.625rem; font-weight: 700; text-transform: uppercase; opacity: 0.7; }
+.rewards-streak-value { font-size: var(--text-xl); font-weight: 900; color: #fbbf24; margin: 0.25rem 0; }
+.rewards-claim-btn { width: 100%; padding: 0.75rem; border-radius: var(--radius-full); font-size: var(--text-sm); font-weight: 900; border: none; cursor: pointer; font-family: inherit; transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s, box-shadow 0.15s; margin-top: var(--space-md); }
+.rewards-claim-btn:active { transform: scale(1.03); }
+.rewards-claim-btn--active { background: #fbbf24; color: var(--color-primary-dark, #064e3b); box-shadow: 0 4px 15px rgba(251, 191, 36, 0.4); }
+.rewards-claim-btn--active:hover { background: #f59e0b; }
+.rewards-claim-btn--claimed { background: #525252; color: #a3a3a3; cursor: not-allowed; }
+.rewards-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
+.rewards-policy { font-size: var(--text-xs); color: var(--text-secondary); line-height: 1.6; }
+
+/* Bento Check-in Card Matrix */
+.rewards-matrix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+@media (min-width: 640px) {
+  .rewards-matrix-grid {
+    grid-template-columns: repeat(7, 1fr);
+  }
+}
+
+.rewards-matrix-card {
+  min-height: 180px;
+  padding: 1.5rem;
+  border-radius: var(--radius-xl);
+  background: var(--color-card);
+  border: 1.5px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  text-align: center;
+  position: relative;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s, box-shadow 0.2s;
+  cursor: default;
+  overflow: hidden;
+}
+
+.rewards-matrix-card--claimed {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: linear-gradient(to bottom, var(--color-card), rgba(16, 185, 129, 0.03));
+}
+
+.rewards-matrix-card--claimable {
+  border-color: #fbbf24;
+  background: linear-gradient(to bottom, var(--color-card), rgba(251, 191, 36, 0.05));
+  box-shadow: 0 0 15px rgba(251, 191, 36, 0.15);
+  cursor: pointer;
+  animation: pulseCard 2s infinite ease-in-out;
+}
+.rewards-matrix-card--claimable:active {
+  transform: scale(1.03);
+}
+
+.rewards-matrix-card--locked {
+  opacity: 0.6;
+}
+
+.rewards-matrix-card .day-label {
+  font-size: 0.6875rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+}
+
+.rewards-matrix-card .gold-val {
+  font-size: 0.8125rem;
+  font-weight: 900;
+  color: #fbbf24;
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.rewards-matrix-card .status-icon-wrap {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Progress Track Line */
+.rewards-progress-track-wrapper {
+  width: 100%;
+  height: 6px;
+  background: var(--color-border);
+  border-radius: 9999px;
+  margin: 1.5rem 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.rewards-progress-track {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(to right, #10b981, #fbbf24);
+  border-radius: 9999px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes pulseCard {
+  0%, 100% { box-shadow: 0 0 15px rgba(251, 191, 36, 0.15); border-color: #fbbf24; }
+  50% { box-shadow: 0 0 25px rgba(251, 191, 36, 0.3); border-color: #f59e0b; }
+}
+
+@keyframes bounceSlow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.animate-pulse-gold {
+  animation: bounceSlow 2s ease-in-out infinite;
+}

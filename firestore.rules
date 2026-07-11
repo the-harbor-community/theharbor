@@ -1,0 +1,312 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------- Helper Functions ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'mursalinkabir9222@gmail.com' ||
+        request.auth.token.email == 'asurausa922@gmail.com' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwnerAlt(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // FIXED: Proper user creation validation
+    function isValidProfileWrite(userId) {
+      return isAuthenticated() && userId == request.auth.uid;
+    }
+
+    // Cross-user operations from original rules
+    function isCrossUserLikesChange(userId) {
+      return isAuthenticated()
+        && request.auth.uid != userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesReceived'])
+        && (request.resource.data.likesReceived == resource.data.get('likesReceived', 0) + 1
+            || request.resource.data.likesReceived == resource.data.get('likesReceived', 0) - 1);
+    }
+
+    function isCrossUserGoldReceivedIncrement(userId) {
+      return isAuthenticated()
+        && request.auth.uid != userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['goldReceived'])
+        && request.resource.data.goldReceived > resource.data.get('goldReceived', 0)
+        && request.resource.data.goldReceived <= resource.data.get('goldReceived', 0) + 100;
+    }
+
+    function isCrossUserFollowChange(userId) {
+      return isAuthenticated()
+        && request.auth.uid != userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers', 'following'])
+        && (request.resource.data.followers == resource.data.followers
+            || request.resource.data.following == resource.data.following);
+    }
+
+    // Story helper functions
+    function storyAuthorId(data) {
+      return data.authorId != null ? data.authorId : data.userId;
+    }
+
+    function storyContentUnchanged() {
+      return request.resource.data.title == resource.data.title
+        && request.resource.data.text == resource.data.text
+        && request.resource.data.category == resource.data.category;
+    }
+
+    function storyLedgerOnlyUpdate() {
+      return storyContentUnchanged()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['reactions', 'goldReceived', 'totalGold', 'commentCount', 'loveCount', 'likes', 'goldDonations', 'donations', 'approved', 'visibility']);
+    }
+
+    // Comment helper functions
+    function isReplyCountIncrement() {
+      return isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['replyCount'])
+        && request.resource.data.replyCount == resource.data.replyCount + 1;
+    }
+
+    function isCommentReactionUpdate() {
+      return isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
+    }
+
+    // ---------- USERS COLLECTION ----------
+    match /users/{userId} {
+      allow read: if resource.data.isPublic == true || (isSignedIn() && (isOwner(userId) || isAdmin()));
+      
+      // FIXED: Create user with proper validation
+      allow create: if isAuthenticated() && userId == request.auth.uid;
+      
+      allow update: if isSignedIn() && (
+        isOwner(userId) || 
+        isAdmin() || 
+        isCrossUserLikesChange(userId) ||
+        isCrossUserGoldReceivedIncrement(userId) ||
+        isCrossUserFollowChange(userId)
+      ) && (
+        // Prevent upgrading to admin unless already an admin
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) || request.resource.data.get('isAdmin', false) == false || (resource != null && resource.data.get('isAdmin', false) == true) || isAdmin())
+      );
+      allow delete: if isSignedIn() && (isOwner(userId) || isAdmin());
+
+      // User Bookmarks Subcollection
+      match /bookmarks/{bookmarkId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // User Reactions Subcollection
+      match /reactions/{reactionId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // User Comment Reactions Subcollection
+      match /commentReactions/{reactionId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    // ---------- STORIES COLLECTION ----------
+    match /stories/{storyId} {
+      allow read: if (
+        resource.data.approved == true && (
+          resource.data.visibility == 'public' || 
+          (isSignedIn() && resource.data.userId == request.auth.uid)
+        )
+      ) || (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin()));
+      
+      allow create: if isAuthenticated()
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+      
+      allow update: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        resource.data.authorId == request.auth.uid || 
+        isAdmin() ||
+        storyLedgerOnlyUpdate() ||
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'reactions', 'commentCount', 'goldReceived', 'totalGold', 'pinnedCommentId'
+          ])
+        )
+      );
+      
+      allow delete: if (isSignedIn() && (resource.data.userId == request.auth.uid || storyAuthorId(resource.data) == request.auth.uid)) || isAdmin();
+
+      // Edit History Subcollection
+      match /editHistory/{historyId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+          && storyAuthorId(get(/databases/$(database)/documents/stories/$(storyId)).data) == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      // Comments Subcollection under Stories
+      match /comments/{commentId} {
+        allow create: if isAuthenticated()
+          && request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if isAuthenticated()
+          && (resource.data.authorId == request.auth.uid || resource.data.userId == request.auth.uid)
+          || isAdmin();
+      }
+    }
+
+    // ---------- COMMENTS (top-level) ----------
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn() && (request.resource.data.userId == request.auth.uid || request.resource.data.authorId == request.auth.uid);
+      
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (get(/databases/$(database)/documents/stories/$(resource.data.storyId)).data.userId == request.auth.uid) ||
+        (get(/databases/$(database)/documents/stories/$(resource.data.storyId)).data.authorId == request.auth.uid) ||
+        ((resource.data.userId == request.auth.uid || resource.data.authorId == request.auth.uid) && 
+         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPinned']))) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'replyCount'])) ||
+        isReplyCountIncrement() ||
+        isCommentReactionUpdate()
+      );
+      
+      allow delete: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        resource.data.authorId == request.auth.uid || 
+        isAdmin() ||
+        (get(/databases/$(database)/documents/stories/$(resource.data.storyId)).data.userId == request.auth.uid) ||
+        (get(/databases/$(database)/documents/stories/$(resource.data.storyId)).data.authorId == request.auth.uid)
+      );
+    }
+
+    // Nested comments under any path
+    match /{path=**}/comments/{commentId} {
+      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if isAuthenticated()
+        && (resource.data.authorId == request.auth.uid || resource.data.userId == request.auth.uid)
+        || isAdmin();
+    }
+
+    // ---------- LOVE LEADERBOARD ----------
+    match /loveLeaderboard/{userId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() 
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['totalPoints', 'updatedAt', 'userId', 'authorId', 'userName'])
+        && (request.resource.data.totalPoints - resource.data.get('totalPoints', 0)) in [-1, 1];
+      allow delete: if false;
+
+      match /events/{eventId} {
+        allow read: if true;
+        allow create: if isAuthenticated()
+          && request.resource.data.userId == userId
+          && request.resource.data.authorId == userId
+          && request.resource.data.reactorUid == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // ---------- NOTIFICATIONS ----------
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && resource.data.toUid == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.fromUid == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.toUid == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.toUid == request.auth.uid;
+    }
+
+    // ---------- DAILY CLAIMS ----------
+    match /dailyClaims/{uid} {
+      allow read, write: if isOwnerAlt(uid);
+    }
+
+    // ---------- GOLD TRANSACTIONS ----------
+    match /goldTransactions/{txId} {
+      allow read: if isSignedIn() && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() 
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.authorId is string;
+      allow update, delete: if false;
+    }
+
+    // ---------- SUGGESTIONS ----------
+    match /suggestions/{suggestionId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() 
+        && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ---------- BUG COLLECTIONS ----------
+    match /bug-fix/{bugId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+    
+    match /bugFixes/{fixId} {
+      allow read: if true;
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+    
+    match /bugs/{bugId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- FLAGGED REPORTS ----------
+    match /flaggedReports/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- FEEDBACK ----------
+    match /feedback/{feedbackId} {
+      allow read: if isAdmin();
+      allow create: if request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.message.size() <= 2000;
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ---------- REPORTS ----------
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && request.resource.data.reportedBy == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- DONATIONS ----------
+    match /donations/{donationId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,63 @@
+.welcome-hero {
+  position: relative;
+  text-align: center;
+  color: #fff;
+  padding: 3.5rem 1.5rem;
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--color-primary), #065f46, #0c4a6e);
+  box-shadow: 0 20px 40px rgba(16, 185, 129, 0.25);
+  margin-bottom: var(--space-xl);
+  overflow: hidden;
+  min-height: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.welcome-hero__icon {
+  width: 5rem; height: 5rem; border-radius: 50%;
+  background: rgba(255,255,255,0.1); backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.5rem; margin-bottom: 1.25rem;
+  animation: floatGentle 4s ease-in-out infinite;
+}
+.welcome-hero h1 { font-size: clamp(1.875rem, 5vw, 3rem); font-weight: 900; margin: 0 0 0.5rem; }
+.welcome-hero__accent { color: var(--color-primary-light); }
+.welcome-hero__tagline { font-size: 1.125rem; opacity: 0.9; max-width: 32rem; margin: 0 0 0.5rem; }
+.welcome-hero__badge { font-size: var(--text-sm); opacity: 0.7; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 2rem; }
+.welcome-hero__actions { display: flex; flex-direction: column; gap: 1rem; width: 100%; max-width: 20rem; }
+@media (min-width: 640px) { .welcome-hero__actions { flex-direction: row; max-width: 28rem; } }
+.welcome-hero__actions .btn { width: 100%; padding: 0.875rem 2rem; font-size: var(--text-base); }
+.btn--hero-primary { background: #fff; color: var(--color-primary); font-weight: 900; }
+.btn--hero-secondary { background: rgba(255,255,255,0.1); color: #fff; border: 2px solid rgba(255,255,255,0.2); font-weight: 800; }
+
+.welcome-features {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;
+}
+@media (min-width: 768px) { .welcome-features { grid-template-columns: repeat(3, 1fr); } }
+.feature-card {
+  background: var(--color-card); border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl); padding: 1.25rem; text-align: center;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.feature-card:hover { transform: scale(1.02); box-shadow: var(--shadow-md); }
+.feature-card__icon { font-size: 1.875rem; display: block; margin-bottom: 0.5rem; }
+.feature-card__title { font-weight: 700; font-size: var(--text-sm); margin-bottom: 0.25rem; }
+.feature-card__desc { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.5; }
+
+.welcome-version-badge {
+  display: inline-block;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fbbf24;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-top: 0.25rem;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 2px 8px rgba(251, 191, 36, 0.1);
+}

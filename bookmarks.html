@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" class="dark-theme">
+<head>`n  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="description" content="View your bookmarked and saved stories on The Harbor." />
+  <meta name="keywords" content="bookmarks, saved, stories, harbor" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta name="author" content="The Harbor Team" />
+  <meta name="theme-color" content="#1a4a4a" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚓</text></svg>">
+  <title>Bookmarks — The Harbor</title>
+  <link rel="stylesheet" href="src/css/theme.css">
+  <link rel="stylesheet" href="src/css/base.css">
+  <link rel="stylesheet" href="src/css/pages/pages-common.css">
+</head>
+<body class="app-shell">
+  <div class="app-shell__bg" aria-hidden="true"></div>
+  <app-loading-screen></app-loading-screen>
+  <app-navigation></app-navigation>
+  <main class="app-shell__main page animate-page-enter" id="main-content" role="main">
+    <div id="bookmarks-root" class="container" style="max-width: var(--container-width); margin: 0 auto; padding: var(--space-md);"></div>
+  </main>
+  <app-footer></app-footer>
+  <button id="settings-fab" class="settings-fab" hidden aria-label="Settings">⚙️</button>
+  <app-sidebar></app-sidebar>
+  <app-hamburger></app-hamburger>
+  <app-auth-modal></app-auth-modal>
+  <app-confirm-modal></app-confirm-modal>
+  <app-gold-modal></app-gold-modal>
+  <app-edit-story-modal></app-edit-story-modal>
+  <app-toast-host></app-toast-host>
+  <app-floating-emojis></app-floating-emojis>
+  <app-onboarding></app-onboarding>
+  <div id="bug-report-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true">
+    <div class="card" style="max-width:24rem;width:100%;position:relative">
+      <button id="bug-close" style="position:absolute;top:1rem;right:1rem;background:none;border:none;cursor:pointer" aria-label="Close">✕</button>
+      <h2 style="font-weight:900;margin:0 0 1rem">🐛 Report a Bug</h2>
+      <form id="bug-form">
+        <label class="label">Priority</label>
+        <select id="bug-priority" class="select"><option value="low">🟢 Low</option><option value="medium">🟡 Medium</option><option value="high">🔴 High</option></select>
+        <label class="label" style="margin-top:0.75rem">Description</label>
+        <textarea id="bug-desc" class="textarea" rows="3" required></textarea>
+        <button type="submit" class="btn btn--danger" style="width:100%;margin-top:0.75rem">Submit</button>
+      </form>
+    </div>
+  </div>
+  <script type="module" src="src/js/shell.js"></script>
+  <script type="module" src="src/js/pages/bookmarks.js"></script>
+</body>
+</html>
+

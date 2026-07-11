@@ -1,0 +1,6 @@
+{
+  "name": "The Harbor",
+  "description": "A digital safe-haven and healing community for sharing anonymous stories, lessons, and receiving emotional support guided by secure AI moderation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
