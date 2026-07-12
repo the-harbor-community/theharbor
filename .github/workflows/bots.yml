@@ -1,0 +1,55 @@
+name: Harbor Community Bot Activity Simulator
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  simulate-bots:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          cache: "npm"
+          node-version: "20"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Initialize Bots (If Needed)
+        run: |
+          if [ ! -f bot-uids.json ]; then
+            echo "🤖 Bot metadata files not found. Running create-bots.js first..."
+            node create-bots.js
+          else
+            echo "🤖 Bots are already initialized."
+          fi
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Commit Bot Metadata (If Generated)
+        run: |
+          if [ -f bot-uids.json ] && git status --porcelain | grep -q "bot-"; then
+            echo "🤖 Committing newly generated bot metadata files back to repository..."
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git add bot-*.json
+            git commit -m "chore: persist generated bot metadata files"
+            git push
+          else
+            echo "🤖 No metadata files generated or modified."
+          fi
+
+      - name: Run Bot Activity Simulator
+        run: node bot-activity.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
