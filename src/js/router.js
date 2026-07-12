@@ -32,15 +32,22 @@ const KEY_TO_FILE = Object.fromEntries(Object.entries(FILE_TO_KEY).map(([f, k]) 
 const getBasePath = () => {
   const pathname = window.location.pathname;
   if (pathname === '/' || pathname === '') return '';
-  const clean = pathname.replace(/\/$/, '');
-  const parts = clean.split('/').filter(p => p);
-  if (parts.length > 0) {
-    const first = parts[0];
-    if (!first.includes('.') && !first.includes('?')) {
-      return '/' + first;
-    }
+  const parts = pathname.split('/').filter(p => p);
+  if (parts.length === 0) return '';
+  let pageIdx = parts.findIndex(p => {
+    const clean = p.split('?')[0].split('#')[0];
+    return clean.endsWith('.html') || FILE_TO_KEY[clean] != null || FILE_TO_KEY[clean + '.html'] != null;
+  });
+  if (pageIdx !== -1) {
+    const baseParts = parts.slice(0, pageIdx);
+    return baseParts.length > 0 ? '/' + baseParts.join('/') : '';
   }
-  return '';
+  const last = parts[parts.length - 1];
+  if (last.includes('.')) {
+    const baseParts = parts.slice(0, -1);
+    return baseParts.length > 0 ? '/' + baseParts.join('/') : '';
+  }
+  return '/' + parts.join('/');
 };
 
 const BASE_PATH = getBasePath();
@@ -210,15 +217,21 @@ export function onPageEnter(pageKey, fn) {
   pageHandlers.set(pageKey, fn);
 }
 
-function syncPageCss(doc) {
+async function syncPageCss(doc) {
   const promises = [];
-  document.querySelectorAll('link[data-harbor-page]').forEach((el) => el.remove());
+  const oldLinks = Array.from(document.querySelectorAll('link[data-harbor-page]'));
+  
   doc.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
     const href = link.getAttribute('href');
     if (!href || !href.includes('pages/')) return;
+    
+    const fullHref = BASE_PATH ? `${BASE_PATH}/${href.replace(/^\//, '')}` : href;
+    const exists = oldLinks.some(el => el.getAttribute('href') === fullHref);
+    if (exists) return;
+    
     const el = document.createElement('link');
     el.rel = 'stylesheet';
-    el.href = BASE_PATH ? `${BASE_PATH}/${href.replace(/^\//, '')}` : href;
+    el.href = fullHref;
     el.setAttribute('data-harbor-page', '');
     
     const loadPromise = new Promise((resolve) => {
@@ -229,7 +242,20 @@ function syncPageCss(doc) {
     
     document.head.appendChild(el);
   });
-  return Promise.all(promises);
+  
+  await Promise.all(promises);
+  
+  oldLinks.forEach((el) => {
+    const isNeeded = Array.from(doc.querySelectorAll('link[rel="stylesheet"]')).some(link => {
+      const href = link.getAttribute('href');
+      if (!href || !href.includes('pages/')) return false;
+      const fullHref = BASE_PATH ? `${BASE_PATH}/${href.replace(/^\//, '')}` : href;
+      return el.getAttribute('href') === fullHref;
+    });
+    if (!isNeeded) {
+      el.remove();
+    }
+  });
 }
 
 function syncBodyClass(doc) {
@@ -248,7 +274,7 @@ async function ensureModule(pageKey) {
   if (loader) await loader();
 }
 
-async function invokePageHandler(pageKey) {
+function invokePageHandler(pageKey) {
   const fn = pageHandlers.get(pageKey);
   if (fn) {
     const unsub = fn();
@@ -312,7 +338,13 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
   navigating = true;
 
   try {
-    disposeGlobalView();
+    const originalMain = document.getElementById('main-content');
+    if (originalMain) {
+      originalMain.style.pointerEvents = 'none';
+      originalMain.style.opacity = '0';
+      // Wait for smooth fade-out transition before clearing content
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
 
     const { replace = false, skipPush = false } = opts;
     const file = KEY_TO_FILE[pageKey];
@@ -373,17 +405,30 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
 
     if (doc.title) document.title = doc.title;
     syncBodyClass(doc);
-    syncPageCss(doc);
+    await syncPageCss(doc);
+    await ensureModule(pageKey);
+
+    // Dispose old view and clear event subscriptions ONLY when new page is fully ready
+    disposeGlobalView();
 
     const main = document.getElementById('main-content');
     swapMainContent(doc);
     if (main) {
       translatePage(main);
-      main.style.opacity = '1';
+      main.style.opacity = '0';
+      main.style.pointerEvents = 'none';
+      // Force a browser reflow to guarantee the opacity change is captured
+      main.offsetHeight; 
     }
 
-    await ensureModule(pageKey);
-    await invokePageHandler(pageKey);
+    invokePageHandler(pageKey);
+
+    if (main) {
+      main.offsetHeight; // Force another reflow before fading in
+      main.style.opacity = '1';
+      main.style.pointerEvents = '';
+    }
+
     playTone('SECTION_TRANSITION');
 
     if (params.hash) {
@@ -391,6 +436,11 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
     }
   } catch (err) {
     console.error('Navigation error:', err);
+    const main = document.getElementById('main-content');
+    if (main) {
+      main.style.opacity = '1';
+      main.style.pointerEvents = '';
+    }
   } finally {
     navigating = false;
   }
@@ -418,19 +468,22 @@ export async function softNavigate(pageKey, params = {}, opts = {}) {
   const targetUrl = buildPageUrl(activePageKey, params);
   
   if (getState().menuOpen) {
-    import(new URL('./store.js', import.meta.url).href).then(m => m.closeMobileMenu());
+    import('./store.js').then(m => m.closeMobileMenu());
   }
   if (getState().sidebarOpen) {
-    import(new URL('./store.js', import.meta.url).href).then(m => m.closeSidebar());
+    import('./store.js').then(m => m.closeSidebar());
   }
 
   const currentHash = window.location.hash || '';
   if (currentHash === targetUrl) {
-    try {
-      await performNavigation(activePageKey, params, targetUrl, { skipPush: true });
-    } catch (err) {
-      console.warn('Manual hash navigate failed:', err);
-    }
+    // Already on the same page! Scroll to top smoothly instead of tearing down DOM and flashing
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    // Close any open search dropdowns
+    document.querySelectorAll('.search-results-dropdown').forEach(d => {
+      if (d instanceof HTMLElement) d.style.display = 'none';
+    });
+    return;
   } else {
     if (replace) {
       const url = new URL(window.location.href);
@@ -486,7 +539,7 @@ export function interceptAnchorClick(event) {
   if (anchor.target === '_blank' || anchor.hasAttribute('download')) return false;
 
   event.preventDefault();
-  event.stopPropagation();
+  event.stopImmediatePropagation();
   event.__harborNavHandled = true;
   handleSPARouteChange(href);
   return true;
@@ -507,7 +560,7 @@ export function interceptNavigationClick(e) {
     const page = node.dataset?.page;
     if (page) {
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       e.__harborNavHandled = true;
       if (page === 'story') {
         const id = node.dataset.id || node.getAttribute('data-id') || '';
@@ -527,7 +580,7 @@ export function interceptNavigationClick(e) {
       const uid = node.dataset.uid || node.getAttribute('data-uid') || '';
       if (uid) {
         e.preventDefault();
-        e.stopPropagation();
+        e.stopImmediatePropagation();
         e.__harborNavHandled = true;
         softNavigate('profile', { uid });
         return true;
@@ -564,10 +617,10 @@ export function initRouter() {
     const { pageKey, params } = parseHash();
     
     if (getState().menuOpen) {
-      import(new URL('./store.js', import.meta.url).href).then(m => m.closeMobileMenu());
+      import('./store.js').then(m => m.closeMobileMenu());
     }
     if (getState().sidebarOpen) {
-      import(new URL('./store.js', import.meta.url).href).then(m => m.closeSidebar());
+      import('./store.js').then(m => m.closeSidebar());
     }
 
     performNavigation(pageKey, params, window.location.hash, { skipPush: true });

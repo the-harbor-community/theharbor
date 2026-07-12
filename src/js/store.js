@@ -267,7 +267,7 @@ export function navigateTo(page, params = {}) {
     window.__harborRouter.navigate(page, params);
     return;
   }
-  import(new URL('./router.js', import.meta.url).href).then(({ softNavigate }) => softNavigate(page, params)).catch(() => {
+  import('./router.js').then(({ softNavigate }) => softNavigate(page, params)).catch(() => {
     showToast(`Navigation to "${page}" failed. Please try again.`, 'error');
   });
 }

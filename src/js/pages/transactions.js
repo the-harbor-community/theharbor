@@ -15,18 +15,32 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s ?? 
 
 function render() {
   const root = el('transactions-root');
-  if (loading) { root.innerHTML = '<div class="page-skeleton"></div>'; return; }
+  if (!root) return;
 
-  root.innerHTML = `
-    <div class="page-header"><h1>🪙 ${t('transaction_history', 'Transaction History')}</h1>
-      <p>Review all your Harbor Gold donations sent and received.</p></div>
-    ${goldTx.length ? goldTx.map(tx => `
-      <div class="card list-item" style="margin-bottom:var(--space-sm);cursor:default;display:flex;justify-content:space-between;align-items:flex-start">
-        <div><div style="font-size:var(--text-xs);font-weight:700">${tx.displayText ? esc(tx.displayText) : `Sent <span style="color:#d97706">${tx.amount} 🪙</span> to <span style="color:var(--color-primary)">${esc(tx.toName)}</span>`}</div>
-          ${tx.message ? `<div style="font-size:0.6875rem;font-style:italic;color:var(--text-secondary);margin-top:0.25rem">"${esc(tx.message)}"</div>` : ''}
-          ${tx.storyTitle ? `<div style="font-size:0.625rem;color:var(--text-muted);margin-top:0.25rem">Story: "${esc(tx.storyTitle)}"</div>` : ''}</div>
-        <span style="font-size:0.625rem;color:var(--text-muted);white-space:nowrap">${new Date(tx.createdAt).toLocaleDateString()}</span>
-      </div>`).join('') : '<div class="page-empty card">No transactions logged yet. Try donating gold to support someone!</div>'}`;
+  let listContainer = el('transactions-list');
+  if (!listContainer) {
+    root.innerHTML = `
+      <div class="page-header">
+        <h1>🪙 ${t('transaction_history', 'Transaction History')}</h1>
+        <p>Review all your Harbor Gold donations sent and received.</p>
+      </div>
+      <div id="transactions-list"></div>
+    `;
+    listContainer = el('transactions-list');
+  }
+
+  if (loading) {
+    listContainer.innerHTML = '<div class="page-skeleton"></div>';
+    return;
+  }
+
+  listContainer.innerHTML = goldTx.length ? goldTx.map(tx => `
+    <div class="card list-item animate-fade-in" style="margin-bottom:var(--space-sm);cursor:default;display:flex;justify-content:space-between;align-items:flex-start">
+      <div><div style="font-size:var(--text-xs);font-weight:700">${tx.displayText ? esc(tx.displayText) : `Sent <span style="color:#d97706">${tx.amount} 🪙</span> to <span style="color:var(--color-primary)">${esc(tx.toName)}</span>`}</div>
+        ${tx.message ? `<div style="font-size:0.6875rem;font-style:italic;color:var(--text-secondary);margin-top:0.25rem">"${esc(tx.message)}"</div>` : ''}
+        ${tx.storyTitle ? `<div style="font-size:0.625rem;color:var(--text-muted);margin-top:0.25rem">Story: "${esc(tx.storyTitle)}"</div>` : ''}</div>
+      <span style="font-size:0.625rem;color:var(--text-muted);white-space:nowrap">${new Date(tx.createdAt).toLocaleDateString()}</span>
+    </div>`).join('') : '<div class="page-empty card">No transactions logged yet. Try donating gold to support someone!</div>';
 }
 
 async function fetchTransactions() {

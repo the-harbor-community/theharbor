@@ -352,9 +352,9 @@ export function setupRealtimeInputHighlighting(el) {
 
 export async function logFlaggedAttempt(content, type) {
   try {
-    const { db } = await import(new URL('./firebase.js', import.meta.url).href);
+    const { db } = await import('./firebase.js');
     const { collection, addDoc } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js');
-    const { getState } = await import(new URL('./store.js', import.meta.url).href);
+    const { getState } = await import('./store.js');
     const { user } = getState();
     await addDoc(collection(db, 'flaggedReports'), {
       content,
@@ -388,7 +388,7 @@ export async function incrementStoryView(storyId) {
   localStorage.setItem(trackerKey, JSON.stringify(tracker));
   
   try {
-    const { db } = await import(new URL('./firebase.js', import.meta.url).href);
+    const { db } = await import('./firebase.js');
     const { doc, updateDoc, increment } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js');
     const storyRef = doc(db, 'stories', storyId);
     await updateDoc(storyRef, { views: increment(1) });

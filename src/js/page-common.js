@@ -35,12 +35,12 @@ export function initBugReport() {
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.hidden = true; });
   document.getElementById('bug-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const { getState, showToast } = await import(new URL('./store.js', import.meta.url).href);
+    const { getState, showToast } = await import('./store.js');
     const { user } = getState();
     if (!user) return;
     const desc = document.getElementById('bug-desc').value.trim();
     if (desc.length < 5) { showToast('⚠️ Please write at least 5 characters.', 'warning'); return; }
-    const { db } = await import(new URL('./firebase.js', import.meta.url).href);
+    const { db } = await import('./firebase.js');
     const { collection, addDoc } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js');
     const { userData } = getState();
     try {

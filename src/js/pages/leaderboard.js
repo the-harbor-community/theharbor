@@ -29,7 +29,8 @@ function render() {
   let listContainer = el('leaderboard-list');
   let tabsContainer = el('leaderboard-tabs');
   if (!listContainer || !tabsContainer) {
-    root.innerHTML = `
+    const mainBuffer = document.createElement('div');
+    mainBuffer.innerHTML = `
       <div class="page-header" style="text-align:center">
         <h1>🏆 Community Leaderboards</h1>
         <p>Honoring the voices and supportive hands guiding our Harbor.</p>
@@ -39,17 +40,23 @@ function render() {
       </div>
       <div id="leaderboard-list" class="card"></div>
     `;
+    root.replaceChildren(...mainBuffer.childNodes);
     listContainer = el('leaderboard-list');
     tabsContainer = el('leaderboard-tabs');
   } else {
-    tabsContainer.innerHTML = renderTabs();
+    const tabsBuffer = document.createElement('div');
+    tabsBuffer.innerHTML = renderTabs();
+    tabsContainer.replaceChildren(...tabsBuffer.childNodes);
   }
+
+  const listBuffer = document.createElement('div');
 
   // Render list or loading state within the list container only (targeted update)
   if (loading) {
-    listContainer.innerHTML = '<div class="page-skeleton" style="margin: 2rem 0;"></div>';
+    listBuffer.innerHTML = '<div class="page-skeleton" style="margin: 2rem 0;"></div>';
+    listContainer.replaceChildren(...listBuffer.childNodes);
   } else {
-    listContainer.innerHTML = leaders.length ? leaders.map((leader, i) => `
+    listBuffer.innerHTML = leaders.length ? leaders.map((leader, i) => `
       <div class="list-item" data-uid="${leader.uid}" style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem 0.5rem;border:none;border-radius:var(--radius-lg);margin:0;cursor:pointer">
         <div style="display:flex;align-items:center;gap:0.75rem">
           <span style="width:1.5rem;height:1.5rem;border-radius:var(--radius-full);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:var(--text-xs);${i === 0 ? 'background:#eab308;color:#fff' : i === 1 ? 'background:#a3a3a3;color:#fff' : i === 2 ? 'background:#d97706;color:#fff' : 'border:1px solid var(--color-border);color:var(--text-muted)'}">${i + 1}</span>
@@ -62,17 +69,18 @@ function render() {
         <span style="font-weight:900;font-size:var(--text-xs)">${activeTab === 'likes' ? `❤️ ${leader.likesReceived || 0}` : activeTab === 'gold' ? `🪙 ${leader.goldGiven || 0}` : `🪙 ${leader.goldReceived || 0}`}</span>
       </div>`).join('') : '<div class="page-empty">No leaderboard entries yet.</div>';
 
-    // Bind row click events for targeted elements
-    document.querySelectorAll('[data-uid]').forEach(row => row.addEventListener('click', () => navigateTo('profile', { uid: row.dataset.uid })));
+    // Bind row click events for targeted elements inside listBuffer
+    listBuffer.querySelectorAll('[data-uid]').forEach(row => row.addEventListener('click', () => navigateTo('profile', { uid: row.dataset.uid })));
+    listContainer.replaceChildren(...listBuffer.childNodes);
   }
 
-  // Bind tab click events without wiping full-frame
-  document.querySelectorAll('[data-tab]').forEach(btn => btn.addEventListener('click', () => {
+  // Bind tab click events without wiping full-frame (always on active tabsContainer)
+  tabsContainer.querySelectorAll('[data-tab]').forEach(btn => btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
     if (activeTab === tab) return;
     activeTab = tab;
     // Visually toggle active tab state instantly for feedback
-    document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === activeTab));
+    tabsContainer.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === activeTab));
     fetchLeaders();
   }));
 }

@@ -1385,7 +1385,7 @@ class AppAuthModal extends HTMLElement {
         });
         payload.emailVerified = true;
         await setDoc(doc(db, 'users', freshUser.uid), payload);
-        const { setUser, setUserData } = await import(new URL('../store.js', import.meta.url).href);
+        const { setUser, setUserData } = await import('../store.js');
         setUser(freshUser || userToVerify);
         setUserData(payload);
         this._clearSignupData();
@@ -1425,7 +1425,7 @@ class AppAuthModal extends HTMLElement {
       showToast('No user session found.', 'error');
       return;
     }
-    const { showConfirm } = await import(new URL('../store.js', import.meta.url).href);
+    const { showConfirm } = await import('../store.js');
     showConfirm(
       '⚠️ Delete Unverified Account',
       'Are you sure you want to permanently delete this unverified account? This action cannot be undone.',

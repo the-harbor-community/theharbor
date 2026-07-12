@@ -7,7 +7,7 @@ import {
   showToast, navigateTo, subscribe, getState,
   setOnboardingActive, setShowWelcomeGold, t
 } from '../store.js';
-import { db, doc } from '../firebase.js';
+import { db, doc, collection } from '../firebase.js';
 import { runTransaction } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
 
 // Centralized high-performance Web Audio Synthesizer inside Onboarding for zero latency
@@ -872,6 +872,19 @@ class AppOnboarding extends HTMLElement {
               createdAt: new Date().toISOString()
             });
           }
+          // Send welcome notification from the Creator to the user's Alerts Inbox
+          const notifRef = doc(collection(db, 'notifications'));
+          transaction.set(notifRef, {
+            toUid: user.uid,
+            fromUid: 'creator',
+            fromName: 'The Creator',
+            type: 'welcome',
+            data: {
+              message: "Welcome to The Harbor! ⚓ The Creator welcomes you. May your anchors hold fast, your heart find peace, and your sails catch gentle winds. Explore stories, connect anonymously, and share your journey with our safe, supportive community!"
+            },
+            read: false,
+            createdAt: new Date().toISOString()
+          });
         });
       } catch (e) {
         console.warn('Failed updating Firebase onboarding fields in transaction:', e);

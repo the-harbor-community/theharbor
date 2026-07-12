@@ -29,7 +29,8 @@ function renderCategoryOptions(userData) {
   const sel = el('category');
   if (!sel) return;
   const opts = allowedStoryCategories(userData?.gender);
-  sel.innerHTML = opts.map(([v, labelKey]) => {
+  const buffer = document.createElement('div');
+  buffer.innerHTML = opts.map(([v, labelKey]) => {
     const labelMap = {
       men: `🧔 ${t('tab_men', "Man")}`,
       women: `👩 ${t('tab_women', 'Woman')}`,
@@ -39,6 +40,7 @@ function renderCategoryOptions(userData) {
     };
     return `<option value="${v}"${v === category ? ' selected' : ''}>${labelMap[v] || labelKey}</option>`;
   }).join('');
+  sel.replaceChildren(...buffer.childNodes);
 }
 
 function restoreDraft(userData) {
@@ -113,12 +115,14 @@ function handleSubmit(e) {
     const errorMsg = 'Inappropriate content detected. Submission blocked to keep The Harbor safe.';
     const errEl = el('form-error');
     if (errEl) {
-      errEl.innerHTML = `
+      const buffer = document.createElement('div');
+      buffer.innerHTML = `
         <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid var(--color-danger); border-radius: 0.5rem; padding: 1rem; color: var(--color-danger); font-size: 0.8125rem; line-height: 1.5; text-align: left;">
           <strong style="display: block; margin-bottom: 0.25rem; font-size: 0.875rem">⚠️ Security Blocked Trigger</strong>
           Your story submission contains language that violates our community guidelines. This attempt has been logged under your account for manual moderation review. Please revise your content.
         </div>
       `;
+      errEl.replaceChildren(...buffer.childNodes);
       errEl.hidden = false;
     } else {
       showFormError(errorMsg);
@@ -184,7 +188,8 @@ function checkBannedState() {
   if (userData?.isBanned) {
     const form = document.getElementById('submit-form');
     if (form) {
-      form.innerHTML = `
+      const buffer = document.createElement('div');
+      buffer.innerHTML = `
         <div style="background: rgba(239, 68, 68, 0.1); border: 2px solid var(--color-danger); padding: 1.5rem; border-radius: var(--radius-lg); text-align: center; color: var(--text-primary);">
           <div style="font-size: 3rem; margin-bottom: 0.75rem;">⚠️</div>
           <h2 style="font-weight: 800; font-size: 1.25rem; color: var(--color-danger); margin-bottom: 0.5rem;">Account Restricted</h2>
@@ -193,6 +198,7 @@ function checkBannedState() {
           </p>
         </div>
       `;
+      form.replaceChildren(...buffer.childNodes);
     }
     return true;
   }
@@ -203,6 +209,13 @@ function init() {
   if (!isSubmitMounted()) return;
   initBugReport();
   const { userData } = getState();
+  
+  // Instant render of default options to prevent layout shift/flickering
+  category = defaultCategory(userData);
+  renderCategoryOptions(userData);
+  restoreDraft(userData);
+  bindForm();
+
   if (!userData) {
     // Wait for userData to become available
     if (unsubscribeUserData) unsubscribeUserData();
@@ -224,16 +237,9 @@ function init() {
       }
     });
     registerPageSubscription(unsubscribeUserData);
-    return;
-  }
-  if (userData.isBanned) {
+  } else if (userData.isBanned) {
     checkBannedState();
-    return;
   }
-  category = defaultCategory(userData);
-  renderCategoryOptions(userData);
-  restoreDraft(userData);
-  bindForm();
 }
 
 guardAuth(init, 'submit');

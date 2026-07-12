@@ -4,7 +4,7 @@
 import { getState, t, navigateTo, subscribe, showToast } from '../store.js';
 import { registerPageSubscription } from '../router.js';
 import { db, collection } from '../firebase.js';
-import { getDocs, query, where } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
+import { getDocs, query, where, getDoc, doc } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
 import { initBugReport } from '../page-common.js';
 import { guardAuth } from './shared.js';
 
@@ -12,6 +12,7 @@ let activeTab = 'all'; // 'all', 'stories', 'comments', 'likes', 'gold'
 let stories = [];
 let comments = [];
 let goldTransactions = [];
+let reactedStories = [];
 let loading = true;
 
 function el(id) { return document.getElementById(id); }
@@ -45,23 +46,12 @@ function renderContent() {
   const container = el('activity-root');
   if (!container) return;
 
-  if (loading) {
-    container.innerHTML = `
-      <div class="page-header">
-        <h1>📊 ${t('activity_heading', 'My Activity')}</h1>
-        <p>Review your contributions and interactions in The Harbor community.</p>
-      </div>
-      <div class="page-skeleton"></div>
-      <div class="page-skeleton"></div>
-    `;
-    return;
-  }
-
   // Ensure base layout with tabs container and list container exists exactly once
   let listContainer = el('activity-list');
   let tabsContainer = el('activity-tabs-container');
   if (!listContainer || !tabsContainer) {
-    container.innerHTML = `
+    const mainBuffer = document.createElement('div');
+    mainBuffer.innerHTML = `
       <div class="page-header">
         <h1>📊 ${t('activity_heading', 'My Activity')}</h1>
         <p>Review your contributions and interactions in The Harbor community.</p>
@@ -69,10 +59,24 @@ function renderContent() {
       <div id="activity-tabs-container">${renderTabs()}</div>
       <div id="activity-list" style="margin-top:var(--space-md)"></div>
     `;
+    container.replaceChildren(...mainBuffer.childNodes);
     listContainer = el('activity-list');
     tabsContainer = el('activity-tabs-container');
   } else {
-    tabsContainer.innerHTML = renderTabs();
+    const tabsBuffer = document.createElement('div');
+    tabsBuffer.innerHTML = renderTabs();
+    tabsContainer.replaceChildren(...tabsBuffer.childNodes);
+  }
+
+  const listBuffer = document.createElement('div');
+
+  if (loading) {
+    listBuffer.innerHTML = `
+      <div class="page-skeleton" style="margin-bottom:var(--space-sm)"></div>
+      <div class="page-skeleton" style="margin-bottom:var(--space-sm)"></div>
+    `;
+    listContainer.replaceChildren(...listBuffer.childNodes);
+    return;
   }
 
   // Determine items based on activeTab
@@ -85,7 +89,7 @@ function renderContent() {
         date: new Date(s.createdAt || Date.now()),
         id: s.id,
         html: `
-          <div class="list-item card" data-page="story" data-id="${s.id}" style="margin-bottom:var(--space-sm)">
+          <div class="list-item card animate-fade-in" data-page="story" data-id="${s.id}" style="margin-bottom:var(--space-sm); cursor:pointer;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start">
               <div>
                 <span class="badge badge--success" style="margin-bottom:0.25rem">${t('story_tab', 'Story')}</span>
@@ -107,7 +111,7 @@ function renderContent() {
         date: new Date(c.createdAt || Date.now()),
         id: c.id,
         html: `
-          <div class="list-item card" data-page="story" data-id="${c.storyId}" data-comment-id="${c.id}" style="margin-bottom:var(--space-sm)">
+          <div class="list-item card animate-fade-in" data-page="story" data-id="${c.storyId}" data-comment-id="${c.id}" style="margin-bottom:var(--space-sm); cursor:pointer;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start">
               <div>
                 <span class="badge badge--warning" style="margin-bottom:0.25rem">${t('comment_tab', 'Comment')}</span>
@@ -123,7 +127,28 @@ function renderContent() {
   }
 
   if (activeTab === 'all' || activeTab === 'likes') {
-    // Stories with reactions
+    // 1) Liked posts user did (stories reacted to by user)
+    reactedStories.forEach(s => {
+      items.push({
+        type: 'like_given',
+        date: new Date(s.createdAt || Date.now()),
+        id: s.id,
+        html: `
+          <div class="list-item card animate-fade-in" data-page="story" data-id="${s.id}" data-scroll-reactions="true" style="margin-bottom:var(--space-sm); cursor:pointer;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <div>
+                <span class="badge badge--danger" style="margin-bottom:0.25rem">❤️ Liked Post</span>
+                <div style="font-size:var(--text-xs);font-weight:700;margin-top:0.25rem">${t('activity_loved_post', 'You loved a story by')}: "${esc(s.authorName || 'Anonymous')}"</div>
+                <div style="font-size:0.6875rem;color:var(--text-secondary);margin-top:0.25rem">"${esc(s.title)}"</div>
+              </div>
+              <span style="font-size:0.625rem;color:var(--text-muted);white-space:nowrap">${s.createdAt ? new Date(s.createdAt).toLocaleDateString() : ''}</span>
+            </div>
+          </div>
+        `
+      });
+    });
+
+    // 2) Stories with reactions (love received on user's own stories)
     stories.filter(s => {
       const rx = s.reactions || {};
       const totalLove = Object.values(rx).reduce((sum, count) => sum + (count || 0), 0);
@@ -132,14 +157,14 @@ function renderContent() {
       const rx = s.reactions || {};
       const totalLove = Object.values(rx).reduce((sum, count) => sum + (count || 0), 0);
       items.push({
-        type: 'like',
+        type: 'like_received',
         date: new Date(s.createdAt || Date.now()),
         id: s.id,
         html: `
-          <div class="list-item card" data-page="story" data-id="${s.id}" style="margin-bottom:var(--space-sm)">
+          <div class="list-item card animate-fade-in" data-page="story" data-id="${s.id}" style="margin-bottom:var(--space-sm); cursor:pointer;">
             <div style="display:flex;justify-content:space-between;align-items:flex-start">
               <div>
-                <span class="badge badge--danger" style="margin-bottom:0.25rem">❤️ Love</span>
+                <span class="badge" style="background:rgba(239, 68, 68, 0.1); color:var(--color-danger); margin-bottom:0.25rem">❤️ Received Love</span>
                 <div style="font-size:var(--text-xs);font-weight:700;margin-top:0.25rem">${t('activity_total_love', 'Total love received on this story')}: <span style="color:var(--color-danger)">${totalLove} ❤️</span></div>
                 <div style="font-size:0.625rem;color:var(--text-muted);margin-top:0.25rem">Story: "${esc(s.title)}"</div>
               </div>
@@ -159,7 +184,7 @@ function renderContent() {
         date: new Date(tx.createdAt || Date.now()),
         id: tx.id,
         html: `
-          <div class="list-item card" style="margin-bottom:var(--space-sm);cursor:default">
+          <div class="list-item card animate-fade-in" style="margin-bottom:var(--space-sm);cursor:default">
             <div style="display:flex;justify-content:space-between;align-items:flex-start">
               <div>
                 <span class="badge" style="background:#fef3c7;color:#d97706;margin-bottom:0.25rem">🪙 Gold</span>
@@ -188,40 +213,42 @@ function renderContent() {
   if (activeTab === 'likes' && items.length === 0) emptyMsg = t('activity_no_likes', 'No likes received yet');
   if (activeTab === 'gold' && goldTransactions.length === 0) emptyMsg = t('activity_no_gold', 'No gold received yet');
 
-  const contentHtml = items.length > 0 
+  listBuffer.innerHTML = items.length > 0 
     ? items.map(it => it.html).join('') 
     : `<div class="page-empty card">${emptyMsg}</div>`;
 
-  if (listContainer) {
-    listContainer.innerHTML = contentHtml;
-  }
-
-  // Bind tab click events
-  document.querySelectorAll('.page-tab').forEach(tab => {
-    tab.addEventListener('click', (e) => {
-      e.preventDefault();
-      activeTab = tab.dataset.tab;
-      renderContent();
-    });
-  });
-
-  // Bind list item click events to navigate to stories
-  document.querySelectorAll('[data-page="story"]').forEach(item => {
+  // Bind list item click events inside listBuffer
+  listBuffer.querySelectorAll('[data-page="story"]').forEach(item => {
     item.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       const storyId = item.dataset.id || localStorage.getItem('LAST_VIEWED_STORY_ID');
       const commentId = item.dataset.commentId;
+      const scrollReactions = item.dataset.scrollReactions === 'true';
       if (storyId) {
         const params = { id: storyId };
         if (commentId) {
           params.hash = `comment-${commentId}`;
+        } else if (scrollReactions) {
+          params.hash = `reactions`;
         }
         navigateTo('story', params);
       } else {
         console.warn('⚠️ No story ID found in element or browser history/memory fallback.');
         showToast('⚠️ Unable to locate story identifier.', 'warning');
       }
+    });
+  });
+
+  // Atomically swap the list content
+  listContainer.replaceChildren(...listBuffer.childNodes);
+
+  // Bind tab click events (always on active tabsContainer)
+  tabsContainer.querySelectorAll('.page-tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      e.preventDefault();
+      activeTab = tab.dataset.tab;
+      renderContent();
     });
   });
 }
@@ -265,6 +292,37 @@ async function fetchActivity() {
     sentSnap.forEach(d => txMap.set(d.id, { id: d.id, ...d.data() }));
     receivedSnap.forEach(d => txMap.set(d.id, { id: d.id, ...d.data() }));
     goldTransactions = Array.from(txMap.values());
+
+    // 4. Fetch user's reactions
+    let reactedStoryIds = [];
+    try {
+      const reactionsSnap = await getDocs(collection(db, 'users', user.uid, 'reactions'));
+      reactionsSnap.forEach(d => {
+        const data = d.data();
+        if (data.emojis && data.emojis.length > 0) {
+          reactedStoryIds.push(d.id);
+        }
+      });
+    } catch (e) {
+      console.warn('Failed to fetch user reactions:', e);
+    }
+
+    reactedStories = [];
+    if (reactedStoryIds.length > 0) {
+      const fetches = reactedStoryIds.slice(0, 20).map(async (sid) => {
+        try {
+          const snap = await getDoc(doc(db, 'stories', sid));
+          if (snap.exists()) {
+            return { id: snap.id, ...snap.data() };
+          }
+        } catch (e) {
+          console.warn(`Failed to fetch reacted story ${sid}:`, e);
+        }
+        return null;
+      });
+      const results = await Promise.all(fetches);
+      reactedStories = results.filter(s => s !== null && s.approved);
+    }
 
   } catch (err) {
     console.error('Error fetching activity:', err);

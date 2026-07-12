@@ -133,7 +133,7 @@ template.innerHTML = `
 
 class AppStoryCard extends HTMLElement {
   static get observedAttributes() {
-    return ['story-id', 'author-id', 'user-id', 'title', 'text', 'author', 'category', 'date', 'anonymous', 'gold', 'comments', 'views', 'highlighted', 'bookmarked'];
+    return ['story-id', 'author-id', 'user-id', 'title', 'text', 'author', 'author-avatar', 'category', 'date', 'anonymous', 'gold', 'comments', 'views', 'highlighted', 'bookmarked'];
   }
 
   constructor() {
@@ -286,9 +286,10 @@ class AppStoryCard extends HTMLElement {
     this._article.id = id ? `story-${id}` : '';
 
     const avatarCls = isAnon ? 'avatar avatar--static' : 'avatar avatar--clickable';
+    const authorAvatar = this.getAttribute('author-avatar') || '👤';
     const avatarEl = isAnon
-      ? `<div class="${avatarCls}" aria-hidden="true">?</div>`
-      : `<button type="button" class="${avatarCls} profile-avatar-link" data-action="profile" data-uid="${escapeHtml(authorId)}" aria-label="${t('view_profile', 'View profile')}">${escapeHtml(author[0]?.toUpperCase() || 'A')}</button>`;
+      ? `<div class="${avatarCls}" aria-hidden="true">🕊️</div>`
+      : `<button type="button" class="${avatarCls} profile-avatar-link" data-action="profile" data-uid="${escapeHtml(authorId)}" aria-label="${t('view_profile', 'View profile')}">${escapeHtml(authorAvatar)}</button>`;
 
     const isBookmarked = this.hasAttribute('bookmarked');
 

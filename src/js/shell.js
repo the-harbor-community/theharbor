@@ -30,6 +30,7 @@ import './components/app-toast-host.js';
 import './components/app-floating-emojis.js';
 import './components/app-onboarding.js';
 import './components/app-story-card.js';
+import './components/app-skeleton-stories.js';
 import './components/app-achievements.js';
 import './components/app-loading-screen.js';
 
@@ -147,7 +148,24 @@ onAuthStateChanged(auth, async (firebaseUser) => {
     }, (err) => {
       console.warn('Bookmarks listener failed:', err);
       if (err.code === 'permission-denied') {
-        handleFirestoreError(err, OperationType.LIST, `users/${firebaseUser.uid}/bookmarks`);
+        const errInfo = {
+          error: err.message,
+          authInfo: {
+            userId: auth.currentUser?.uid,
+            email: auth.currentUser?.email,
+            emailVerified: auth.currentUser?.emailVerified,
+            isAnonymous: auth.currentUser?.isAnonymous,
+            tenantId: auth.currentUser?.tenantId,
+            providerInfo: auth.currentUser?.providerData?.map(p => ({
+              providerId: p.providerId,
+              email: p.email,
+            })) || []
+          },
+          operationType: OperationType.LIST,
+          path: `users/${firebaseUser.uid}/bookmarks`
+        };
+        console.error('Firestore Error: ', JSON.stringify(errInfo));
+        showToast('⚠️ Unable to load bookmarks. Please verify your email or ensure rules are deployed.', 'warning');
       }
     });
   } else {
@@ -227,63 +245,12 @@ function _bindGlobalClickIntercept() {
   }, true);
 }
 
-// 🔥 EXTRA SAFETY: Capture‑phase click interceptor for all internal links and data-page elements
-function _addGlobalLinkInterceptor() {
-  document.addEventListener('click', (e) => {
-    // Only act on left‑click without modifier keys
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
-    
-    const target = e.target.closest('a, [data-page]');
-    if (!target) return;
-
-    const page = target.dataset?.page;
-    const href = target.getAttribute('href');
-
-    if (page) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      e.__harborNavHandled = true;
-      import('./router.js').then(({ __harborRouter }) => {
-        if (page === 'story') {
-          const id = target.dataset.id || target.getAttribute('data-id') || '';
-          if (id) __harborRouter.navigate('story', { id });
-        } else if (page === 'profile') {
-          const uid = target.dataset.uid || window.__harborAuthUid?.() || '';
-          if (uid) __harborRouter.navigate('profile', { uid });
-        } else {
-          __harborRouter.navigate(page);
-        }
-      });
-      return;
-    }
-
-    if (href) {
-      if (href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
-      if (target.target === '_blank' || target.hasAttribute('download')) return;
-      
-      // Check if it's an internal link (same origin)
-      try {
-        const url = new URL(href, window.location.href);
-        if (url.origin !== window.location.origin) return;
-      } catch (_) { return; }
-
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      e.__harborNavHandled = true;
-      import('./router.js').then(({ handleSPARouteChange }) => {
-        handleSPARouteChange(href);
-      });
-    }
-  }, true); // capture phase
-}
-
 function bootstrapShell() {
   if (shellBootstrapped) return;
   shellBootstrapped = true;
   // Router already initialised at the top
 
   _bindGlobalClickIntercept();
-  _addGlobalLinkInterceptor(); // 🔥 Extra safety interceptor
 
   document.addEventListener('story-bookmark-toggle', async (e) => {
     const { id, isBookmarked } = e.detail;
@@ -295,7 +262,7 @@ function bootstrapShell() {
     }
 
     try {
-      const { setDoc, deleteDoc, doc, db } = await import(new URL('./firebase.js', import.meta.url).href);
+      const { setDoc, deleteDoc, doc, db } = await import('./firebase.js');
       const bookmarkRef = doc(db, 'users', user.uid, 'bookmarks', id);
       if (isBookmarked) {
         try {

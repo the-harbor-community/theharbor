@@ -100,6 +100,9 @@ function renderNotifText(n) {
   if (n.type === 'gold') {
     return `💰 ${name} sent you <strong style="color:#d97706">${n.data?.amount} 🪙 Gold</strong>${n.data?.message ? `<span style="display:block;font-style:italic;color:var(--text-muted);margin-top:0.25rem">"${esc(n.data.message)}"</span>` : ''}`;
   }
+  if (n.type === 'welcome') {
+    return `⚓ <strong style="color:var(--color-primary)">${esc(n.fromName)}</strong>: ${esc(n.data?.message || 'Welcome to the Harbor!')}`;
+  }
   return esc(n.type);
 }
 
@@ -109,26 +112,60 @@ function render() {
     console.warn('notifications-root not found');
     return;
   }
-  if (loading) { root.innerHTML = '<div class="page-skeleton"></div>'; return; }
+  
+  let listContainer = el('notifications-list');
+  let headerContainer = el('notifications-header');
+  if (!listContainer || !headerContainer) {
+    const mainBuffer = document.createElement('div');
+    mainBuffer.innerHTML = `
+      <div id="notifications-header" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:var(--space-lg);border-bottom:1px solid var(--color-border);padding-bottom:0.75rem">
+        <div class="page-header" style="margin:0">
+          <h1>🔔 Alerts Inbox</h1>
+          <p>Stay updated with likes, comments, gold, and follow activity.</p>
+        </div>
+        <div id="mark-all-btn-container"></div>
+      </div>
+      <div id="notifications-list"></div>
+    `;
+    root.replaceChildren(...mainBuffer.childNodes);
+    listContainer = el('notifications-list');
+    headerContainer = el('notifications-header');
+  }
+  
+  if (loading) {
+    const listBuffer = document.createElement('div');
+    listBuffer.innerHTML = '<div class="page-skeleton" style="margin: 2rem 0;"></div>';
+    listContainer.replaceChildren(...listBuffer.childNodes);
+    const btnContainer = root.querySelector('#mark-all-btn-container');
+    if (btnContainer) {
+      const btnBuffer = document.createElement('div');
+      btnContainer.replaceChildren(...btnBuffer.childNodes);
+    }
+    return;
+  }
   
   const aggregated = aggregateNotifications(notifs);
   const hasUnread = aggregated.some(n => n.unread);
 
-  root.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:var(--space-lg);border-bottom:1px solid var(--color-border);padding-bottom:0.75rem">
-      <div class="page-header" style="margin:0"><h1>🔔 Alerts Inbox</h1><p>Stay updated with likes, comments, gold, and follow activity.</p></div>
-      ${hasUnread ? '<button class="btn btn--ghost" id="mark-all" style="font-size:var(--text-xs)">✓ Mark All Read</button>' : ''}
-    </div>
-    ${aggregated.length ? aggregated.map(n => `
-      <div class="list-item card animate-fade-in" data-group-key="${n.rawIds.join(',')}" style="margin-bottom:var(--space-sm);display:flex;justify-content:space-between;align-items:center;cursor:pointer;${n.unread ? 'background:rgba(16,185,129,0.05);border-color:rgba(16,185,129,0.2)' : ''}">
-        <div><div style="font-size:var(--text-xs)">${renderNotifText(n)}</div>
-          <div style="font-size:0.625rem;color:var(--text-muted);font-weight:700;margin-top:0.25rem">${new Date(n.latestCreatedAt || n.createdAt).toLocaleString()}</div></div>
-        ${n.unread ? '<span style="width:0.625rem;height:0.625rem;background:var(--color-primary);border-radius:var(--radius-full);flex-shrink:0"></span>' : ''}
-      </div>`).join('') : '<div class="page-empty card">All quiet! No notifications yet.</div>'}`;
+  const btnContainer = root.querySelector('#mark-all-btn-container');
+  if (btnContainer) {
+    const btnBuffer = document.createElement('div');
+    btnBuffer.innerHTML = hasUnread ? '<button class="btn btn--ghost" id="mark-all" style="font-size:var(--text-xs)">✓ Mark All Read</button>' : '';
+    btnBuffer.querySelector('#mark-all')?.addEventListener('click', handleMarkAllRead);
+    btnContainer.replaceChildren(...btnBuffer.childNodes);
+  }
 
-  el('mark-all')?.addEventListener('click', handleMarkAllRead);
-  
-  root.querySelectorAll('[data-group-key]').forEach(item => {
+  const listBuffer = document.createElement('div');
+  listBuffer.innerHTML = aggregated.length ? aggregated.map(n => `
+    <div class="list-item card animate-fade-in" data-group-key="${n.rawIds.join(',')}" style="margin-bottom:var(--space-sm);display:flex;justify-content:space-between;align-items:center;cursor:pointer;${n.unread ? 'background:rgba(16,185,129,0.05);border-color:rgba(16,185,129,0.2)' : ''}">
+      <div>
+        <div style="font-size:var(--text-xs)">${renderNotifText(n)}</div>
+        <div style="font-size:0.625rem;color:var(--text-muted);font-weight:700;margin-top:0.25rem">${new Date(n.latestCreatedAt || n.createdAt).toLocaleString()}</div>
+      </div>
+      ${n.unread ? '<span style="width:0.625rem;height:0.625rem;background:var(--color-primary);border-radius:var(--radius-full);flex-shrink:0"></span>' : ''}
+    </div>`).join('') : '<div class="page-empty card">All quiet! No notifications yet.</div>';
+
+  listBuffer.querySelectorAll('[data-group-key]').forEach(item => {
     item.addEventListener('click', () => {
       const groupNotif = aggregated.find(g => g.rawIds.join(',') === item.dataset.groupKey);
       if (groupNotif) {
@@ -136,6 +173,8 @@ function render() {
       }
     });
   });
+
+  listContainer.replaceChildren(...listBuffer.childNodes);
 }
 
 async function fetchNotifs() {

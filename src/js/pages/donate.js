@@ -91,13 +91,14 @@ function initDonatePage() {
 
       // Update Benefactors Listing
       if (benefactorsSection && benefactorsList) {
+        const benefactorsBuffer = document.createElement('div');
         if (approvedDonations.length > 0) {
           benefactorsSection.style.display = 'flex';
           
           // Sort descending by timestamp
           approvedDonations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
           
-          benefactorsList.innerHTML = approvedDonations.map(d => {
+          benefactorsBuffer.innerHTML = approvedDonations.map(d => {
             const dateStr = new Date(d.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
             return `
               <div style="background: var(--bg-primary); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 0.5rem; display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem;">
@@ -110,12 +111,13 @@ function initDonatePage() {
             `;
           }).join('');
         } else {
-          benefactorsList.innerHTML = `
+          benefactorsBuffer.innerHTML = `
             <div style="text-align: center; color: var(--text-muted); font-size: 0.75rem; padding: 1.5rem 0;">
               No contributors validated this month yet.
             </div>
           `;
         }
+        benefactorsList.replaceChildren(...benefactorsBuffer.childNodes);
       }
     } catch (err) {
       console.warn('Could not load community tracker stats:', err);
@@ -148,7 +150,8 @@ function initDonatePage() {
       }
 
       historySection.style.display = 'block';
-      historyList.innerHTML = userDonations.map(item => {
+      const historyBuffer = document.createElement('div');
+      historyBuffer.innerHTML = userDonations.map(item => {
         const dateStr = new Date(item.timestamp).toLocaleDateString(undefined, {
           month: 'short',
           day: 'numeric',
@@ -186,6 +189,7 @@ function initDonatePage() {
           </div>
         `;
       }).join('');
+      historyList.replaceChildren(...historyBuffer.childNodes);
     } catch (err) {
       console.warn('Could not load user donation history:', err);
     }

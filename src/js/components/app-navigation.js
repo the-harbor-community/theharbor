@@ -681,10 +681,10 @@ class AppNavigation extends HTMLElement {
     const btn = this.shadowRoot.getElementById('hamburger-btn');
     if (!btn) return;
     btn.querySelectorAll('.badge, .bug-pulse').forEach(el => el.remove());
-    if (this._unreadNotifs > 0 || this._pendingBugs > 0) {
+    if (this._pendingBugs > 0) {
       const badge = document.createElement('span');
       badge.className = 'badge';
-      badge.textContent = String(this._unreadNotifs + this._pendingBugs);
+      badge.textContent = String(this._pendingBugs);
       btn.appendChild(badge);
     }
   }

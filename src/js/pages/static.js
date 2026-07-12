@@ -18,7 +18,8 @@ let staticBound = false;
 function renderAbout() {
   const root = el('static-content');
   if (!root) return;
-  root.innerHTML = `
+  const buffer = document.createElement('div');
+  buffer.innerHTML = `
     <article class="card static-article animate-page-enter">
       <h1>🌿 ${t('about', 'About The Harbor')}</h1>
       <p>The Harbor was designed as a modern, digital sanctuary for sharing, healing, and growing together. We understand that navigating the storms of life can feel isolating. Our mission is to build safe, authentic, and structured environments where you can speak your truth without judgment.</p>
@@ -47,13 +48,15 @@ function renderAbout() {
         <button type="submit" class="btn btn--primary" style="width:100%" id="contact-submit">🚀 Send Message</button>
       </form>
     </section>`;
-  el('contact-form')?.addEventListener('submit', handleContactSubmit);
+  buffer.querySelector('#contact-form')?.addEventListener('submit', handleContactSubmit);
+  root.replaceChildren(...buffer.childNodes);
 }
 
 function renderTerms() {
   const root = el('static-content');
   if (!root) return;
-  root.innerHTML = `
+  const buffer = document.createElement('div');
+  buffer.innerHTML = `
     <article class="card static-article animate-page-enter">
       <h1>📜 ${t('terms', 'Terms of Service')}</h1>
       <p style="font-size:0.625rem;color:var(--text-muted)">Last updated: July 2026 | Effective immediately upon registration</p>
@@ -73,22 +76,24 @@ function renderTerms() {
       
       <h2>4. User Deletion Rights</h2>
       <p>You maintain the absolute right to delete any of your published stories, comments, or your complete user account at any time. Account deletion permanently purges all your profile data from our cloud databases (Firestore) and authentication systems immediately and irreversibly.</p>
-
+  
       <h2>5. Content Safety & Automated AI Moderation</h2>
       <p>To preserve a secure peer-support sanctuary, The Harbor employs automated real-time content moderation. Submissions are scanned by server-side AI tools (e.g. Gemini API) to detect severe harassment, hate speech, graphic/explicit material, or unsafe self-harm details. We reserve the absolute right to flag, hide, or delete submissions that violate safety standards.</p>
-
+  
       <h2>6. Liability Boundaries & Medical Disclaimer</h2>
       <div class="static-disclaimer" style="margin: 1.5rem 0;">
         ⚠️ <strong>CRITICAL CLINICAL DISCLAIMER:</strong> The Harbor is a peer support community. It is NOT a professional clinical, psychiatric, psychological, or medical provider. The services and content are for informational and peer connection purposes only and do not constitute professional advice or treatment. Always consult a licensed medical or mental health professional for serious distress or emergencies.
       </div>
       <p>The Harbor acts solely as a technological host and intermediary for peer support. Under no circumstances shall The Harbor, its volunteers, or its developers be liable for any direct, indirect, incidental, or consequential damages resulting from user contributions or reliance on platform content.</p>
     </article>`;
+  root.replaceChildren(...buffer.childNodes);
 }
 
 function renderPrivacy() {
   const root = el('static-content');
   if (!root) return;
-  root.innerHTML = `
+  const buffer = document.createElement('div');
+  buffer.innerHTML = `
     <article class="card static-article animate-page-enter">
       <h1>🔒 ${t('privacy', 'Privacy Policy')}</h1>
       <p style="font-size:0.625rem;color:var(--text-muted)">Last updated: July 2026 | Dedicated to complete transparency</p>
@@ -101,10 +106,10 @@ function renderPrivacy() {
         <li><strong>User-Generated Content:</strong> Stories, comments, and reaction records you actively publish on the platform.</li>
       </ul>
       <p>This data is processed solely to authenticate user logins, host peer sharing, run safety algorithms, and send account alerts.</p>
-
+  
       <h2>2. Data Protection, Storage & Security</h2>
       <p>Your personal data and private logs are stored securely using Firestore with industry-standard server-side access rule enforcement. Security rules strictly prevent unauthorized public access to unapproved or private user settings. We implement administrative and physical security barriers to defend your credentials against unauthorized disclosure.</p>
-
+  
       <h2>3. Digital Privacy Frameworks & GDPR Rights</h2>
       <p>The Harbor is dedicated to international digital safety guidelines and GDPR principles, giving you the right to:</p>
       <ul>
@@ -112,23 +117,25 @@ function renderPrivacy() {
         <li><strong>Right to Rectification:</strong> Edit your profile details, bio, or stories instantly.</li>
         <li><strong>Right to Erasure (Forget Me):</strong> Instantly delete any comment, story, or permanently delete your entire account, removing all matching documents from our active database.</li>
       </ul>
-
+  
       <h2>4. Cookies & Ad-Tracking Mitigation</h2>
       <ul>
         <li><strong>Zero Commercial Trackers:</strong> No advertising APIs, pixel tracking, or marketing scripts are ever loaded.</li>
         <li><strong>Essential Storage Only:</strong> We use minimal local storage / browser cookies strictly required for active session authentication, theme states, language choice, and story draft backups.</li>
         <li><strong>Zero Data Selling:</strong> Your data is never sold, traded, or monetized for commercial advertising.</li>
       </ul>
-
+  
       <h2>5. Profile Visibility Options</h2>
       <p>You can toggle your profile visibility between Public and Private in your Account Settings. Private profiles restrict access to your follower list and guard your shared index from unverified captains.</p>
     </article>`;
+  root.replaceChildren(...buffer.childNodes);
 }
 
 function renderEmergency() {
   const root = el('static-content');
   if (!root) return;
-  root.innerHTML = `
+  const buffer = document.createElement('div');
+  buffer.innerHTML = `
     <article class="card static-article animate-page-enter">
       <div class="emergency-banner"><span style="font-size:2rem">🆘</span>
         <div><h2 style="font-weight:900;font-size:var(--text-sm);text-transform:uppercase;margin:0">Immediate Critical Notice</h2>
@@ -142,17 +149,29 @@ function renderEmergency() {
       </div>
       <div class="card" style="text-align:center;margin-top:var(--space-md);font-size:var(--text-xs);color:var(--text-muted)">💙 You are not alone on this voyage. Reach out whenever you need assistance.</div>
     </article>`;
+  root.replaceChildren(...buffer.childNodes);
 }
 
 async function handleContactSubmit(e) {
   e.preventDefault();
-  const nameTrim = el('contact-name').value.trim();
-  const emailTrim = el('contact-email').value.trim();
-  const msgTrim = el('contact-message').value.trim();
-  el('contact-error').hidden = true;
-  el('contact-success').hidden = true;
+  const nameEl = el('contact-name');
+  const emailEl = el('contact-email');
+  const msgEl = el('contact-message');
+  const catEl = el('contact-category');
+  const errEl = el('contact-error');
+  const successEl = el('contact-success');
+  const submitBtn = el('contact-submit');
+
+  if (!nameEl || !emailEl || !msgEl || !catEl) return;
+
+  const nameTrim = nameEl.value.trim();
+  const emailTrim = emailEl.value.trim();
+  const msgTrim = msgEl.value.trim();
+
+  if (errEl) errEl.hidden = true;
+  if (successEl) successEl.hidden = true;
+
   if (!nameTrim || !emailTrim || !msgTrim) {
-    const errEl = el('contact-error');
     if (errEl) {
       errEl.textContent = t('all_fields_required', 'All fields are required.');
       errEl.hidden = false;
@@ -160,42 +179,49 @@ async function handleContactSubmit(e) {
     return;
   }
   if (!emailTrim.includes('@')) {
-    const errEl = el('contact-error');
     if (errEl) {
       errEl.textContent = t('invalid_email', 'Please provide a valid email address.');
       errEl.hidden = false;
     }
     return;
   }
-  const submitBtn = el('contact-submit');
   if (submitBtn) submitBtn.disabled = true;
   try {
     await addDoc(collection(db, 'feedback'), {
-      name: nameTrim, email: emailTrim, category: el('contact-category').value,
+      name: nameTrim, email: emailTrim, category: catEl.value,
       message: msgTrim, createdAt: new Date().toISOString(), status: 'new',
     });
-    el('contact-success').innerHTML = '🎉 Message Submitted Successfully!<br><span style="font-weight:normal;color:var(--text-secondary)">Our team reviews submissions within 24 hours.</span>';
-    el('contact-success').hidden = false;
+    
+    const currentSuccess = el('contact-success');
+    if (currentSuccess) {
+      currentSuccess.innerHTML = '🎉 Message Submitted Successfully!<br><span style="font-weight:normal;color:var(--text-secondary)">Our team reviews submissions within 24 hours.</span>';
+      currentSuccess.hidden = false;
+    }
     showToast('✅ Message received! We will respond shortly.', 'success');
-    el('contact-name').value = '';
-    el('contact-email').value = '';
-    el('contact-message').value = '';
+    
+    const currentName = el('contact-name');
+    const currentEmail = el('contact-email');
+    const currentMsg = el('contact-message');
+    if (currentName) currentName.value = '';
+    if (currentEmail) currentEmail.value = '';
+    if (currentMsg) currentMsg.value = '';
   } catch (err) {
-    const errEl = el('contact-error');
-    if (errEl) {
-      errEl.textContent = err.message || 'Failed to submit.';
-      errEl.hidden = false;
+    const currentErr = el('contact-error');
+    if (currentErr) {
+      currentErr.textContent = err.message || 'Failed to submit.';
+      currentErr.hidden = false;
     }
   } finally {
-    const submitBtn = el('contact-submit');
-    if (submitBtn) submitBtn.disabled = false;
+    const currentSubmit = el('contact-submit');
+    if (currentSubmit) currentSubmit.disabled = false;
   }
 }
 
 function renderPhilosophy() {
   const root = el('static-content');
   if (!root) return;
-  root.innerHTML = `
+  const buffer = document.createElement('div');
+  buffer.innerHTML = `
     <article class="card static-article animate-page-enter" style="max-width:38rem;margin:0 auto;line-height:1.8;padding:var(--space-xl)">
       <div style="text-align:center;margin-bottom:var(--space-lg)">
         <span style="font-size:3rem;display:block;margin-bottom:0.5rem">⚓</span>
@@ -221,6 +247,7 @@ function renderPhilosophy() {
         <span style="font-size:0.75rem;color:var(--text-muted)">July 10, 2026</span>
       </div>
     </article>`;
+  root.replaceChildren(...buffer.childNodes);
 }
 
 function init() {
@@ -232,7 +259,7 @@ function init() {
     el('back-btn')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      import(new URL('../store.js', import.meta.url).href).then(({ getState }) => {
+      import('../store.js').then(({ getState }) => {
         navigateTo(getState().user ? 'feed' : 'welcome');
       });
     });

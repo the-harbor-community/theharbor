@@ -31,15 +31,19 @@ let currentStoryId = null;
 function el(id) { return document.getElementById(id); }
 
 function renderLoading() {
-  el('story-root').innerHTML = '<div class="page-skeleton"></div><div class="page-skeleton"></div>';
+  const root = el('story-root');
+  if (root) root.innerHTML = '<div class="page-skeleton"></div><div class="page-skeleton"></div>';
 }
 
 function renderError(msg) {
-  el('story-root').innerHTML = `
-    <div class="page-error">⚠️ ${msg}
-      <button class="btn btn--primary" style="margin-top:1rem" id="back-feed">${t('back_home', '← Back to Home')}</button>
-    </div>`;
-  el('back-feed')?.addEventListener('click', (e) => { e.preventDefault(); handleBackToFeed(); });
+  const root = el('story-root');
+  if (root) {
+    root.innerHTML = `
+      <div class="page-error">⚠️ ${msg}
+        <button class="btn btn--primary" style="margin-top:1rem" id="back-feed">${t('back_home', '← Back to Home')}</button>
+      </div>`;
+    el('back-feed')?.addEventListener('click', (e) => { e.preventDefault(); handleBackToFeed(); });
+  }
 }
 
 function handleBackToFeed(e) {
@@ -280,43 +284,34 @@ async function generateAiReflection() {
   btn.textContent = 'Reflecting...';
   textEl.innerHTML = '<div class="feed-skeleton" style="height:2rem; margin-top:0.25rem;"></div>';
   
-  const apiKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || localStorage.getItem('GEMINI_API_KEY') || '';
   let success = false;
   let summary = '';
 
-  if (apiKey) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-      const promptText = `Provide a warm, highly empathetic, and supportive AI reflection for the following anonymous story. Focus on validating their emotions, offering deep insight or a new perspective, and suggesting a gentle reflective question or next step. Keep the response around 2 to 3 sentences, comforting and gentle. Do not use markdown headers, lists, or bolding. Keep it pure plain text.
-Story text: ${story.text}`;
+    const response = await fetch('./api/gemini/reflect', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: story.text
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: promptText }]
-          }]
-        }),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const data = await response.json();
-        const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (generatedText) {
-          summary = generatedText.trim();
-          success = true;
-        }
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.reflection) {
+        summary = data.reflection.trim();
+        success = true;
       }
-    } catch (err) {
-      console.warn('Direct Gemini API request failed, moving to local narrative matrix metadata fallback:', err);
     }
+  } catch (err) {
+    console.warn('Server Gemini reflection request failed, moving to local narrative matrix metadata fallback:', err);
   }
 
   if (!success) {
@@ -773,6 +768,23 @@ async function loadStory() {
 function handleHashScroll(customHash) {
   const hash = typeof customHash === 'string' ? customHash : window.location.hash;
   if (!hash) return;
+  if (hash.includes('reactions')) {
+    setTimeout(() => {
+      const rxEl = document.querySelector('.story-reactions');
+      if (rxEl) {
+        rxEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        rxEl.style.outline = '3px solid var(--color-danger)';
+        rxEl.style.borderRadius = 'var(--radius-lg)';
+        rxEl.style.padding = '0.5rem';
+        rxEl.style.transition = 'all 0.4s ease';
+        setTimeout(() => {
+          rxEl.style.outline = '';
+          rxEl.style.padding = '';
+        }, 4000);
+      }
+    }, 300);
+    return;
+  }
   const match = hash.match(/comment-([a-zA-Z0-9_-]+)/);
   if (!match) return;
   const commentId = match[1];

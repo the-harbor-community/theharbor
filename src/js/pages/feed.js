@@ -184,12 +184,12 @@ function restoreScrollPosition() {
   }
 }
 
-function updateStoryCard(storyId) {
+function updateStoryCard(storyId, searchRoot = document) {
   if (detectCurrentPageKey() !== 'feed') return;
   const story = stories.find(s => s.id === storyId);
   if (!story) return;
   const { user, bookmarks } = getState();
-  const card = document.querySelector(`app-story-card[story-id="${CSS.escape(storyId)}"]`);
+  const card = searchRoot.querySelector(`app-story-card[story-id="${CSS.escape(storyId)}"]`);
   if (!card) return;
   card.setReactions(story.reactions, userReactions[storyId], handleReaction);
   card.showGoldButton(user && resolveAuthorId(story) !== user.uid);
@@ -204,6 +204,7 @@ function updateStoryCard(storyId) {
 function renderStories(isAppending = false) {
   const container = pageEl('stories-container');
   if (!container) return;
+  container.style.opacity = '1';
   const { user } = getState();
   const filtered = filterByGender(stories.filter(s => {
     if (!searchTerm.trim()) return true;
@@ -212,11 +213,14 @@ function renderStories(isAppending = false) {
   }), getState().userData);
 
   if (loading && !stories.length) {
-    container.innerHTML = '<div class="feed-skeleton"></div><div class="feed-skeleton"></div>';
+    const listBuffer = document.createElement('div');
+    listBuffer.innerHTML = '<div class="feed-skeleton"></div><div class="feed-skeleton"></div>';
+    container.replaceChildren(...listBuffer.childNodes);
     return;
   }
   if (!filtered.length) {
-    container.innerHTML = `
+    const emptyBuffer = document.createElement('div');
+    emptyBuffer.innerHTML = `
       <div class="feed-empty animate-fade-in" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 4rem 2rem; text-align:center;">
         <div style="font-size: 4rem; margin-bottom: 1rem; filter: drop-shadow(0 4px 12px rgba(16,185,129,0.15)); animation: floatGentle 4s ease-in-out infinite;">⚓</div>
         <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text-primary); margin-bottom: 0.5rem;">${t('no_results_title', 'The Harbor is quiet right now')}</h3>
@@ -226,7 +230,7 @@ function renderStories(isAppending = false) {
         <button id="clear-search-btn" class="btn btn--secondary btn--sm" style="font-size: 0.75rem; padding: 0.5rem 1rem; border-radius: var(--radius-full);">${t('clear_search', 'Clear Search')}</button>
       </div>`;
     
-    const clearBtn = container.querySelector('#clear-search-btn');
+    const clearBtn = emptyBuffer.querySelector('#clear-search-btn');
     if (clearBtn) {
       clearBtn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -238,6 +242,7 @@ function renderStories(isAppending = false) {
         }
       });
     }
+    container.replaceChildren(...emptyBuffer.childNodes);
 
     const loadMoreWrap = pageEl('load-more-wrap');
     if (loadMoreWrap) loadMoreWrap.hidden = true;
@@ -246,16 +251,17 @@ function renderStories(isAppending = false) {
     return;
   }
 
-  if (!isAppending) {
-    container.innerHTML = '';
+  const listBuffer = document.createElement('div');
+  if (isAppending) {
+    listBuffer.append(...container.childNodes);
   }
 
-  const existingCards = Array.from(container.querySelectorAll('app-story-card'));
+  const existingCards = Array.from(listBuffer.querySelectorAll('app-story-card'));
   const existingIds = new Set(existingCards.map(c => c.getAttribute('story-id')));
 
   filtered.forEach((story, index) => {
     if (existingIds.has(story.id)) {
-      updateStoryCard(story.id);
+      updateStoryCard(story.id, listBuffer);
       return;
     }
 
@@ -266,6 +272,7 @@ function renderStories(isAppending = false) {
     card.setAttribute('title', story.title || '');
     card.setAttribute('text', story.text || '');
     card.setAttribute('author', story.authorName || '');
+    card.setAttribute('author-avatar', story.isAnonymous ? '🕊️' : (story.authorAvatar || '👤'));
     card.setAttribute('category', story.category || '');
     card.setAttribute('date', formatTimeAgo(story.createdAt));
     if (story.isAnonymous) card.setAttribute('anonymous', '');
@@ -279,11 +286,14 @@ function renderStories(isAppending = false) {
     // Smooth cascading stagger effect (max 0.4s delay)
     card.style.animationDelay = `${Math.min(index * 0.05, 0.4)}s`;
 
-    container.appendChild(card);
+    listBuffer.appendChild(card);
     card.setReactions(story.reactions, userReactions[story.id], handleReaction);
     card.showGoldButton(user && resolveAuthorId(story) !== user.uid);
     card.setNavigateHandler((id) => openStoryPreviewModal(id), activeCategory);
   });
+  
+  container.replaceChildren(...listBuffer.childNodes);
+
   const loadMoreWrap = pageEl('load-more-wrap');
   if (loadMoreWrap) loadMoreWrap.hidden = !hasMore;
   restoreScrollPosition();
@@ -295,8 +305,24 @@ async function fetchStories(loadMore = false) {
   if (!user || loading) return;
   if (loadMore && !hasMore) return;
   loading = true;
-  if (!loadMore) { lastDoc = null; hasMore = true; stories = []; }
-  renderStories(loadMore);
+  
+  const container = pageEl('stories-container');
+  if (!loadMore) {
+    lastDoc = null;
+    hasMore = true;
+    if (stories.length > 0) {
+      renderStories(false);
+      if (container) {
+        container.style.opacity = '0.6';
+        container.style.transition = 'opacity 0.15s ease';
+      }
+    } else {
+      stories = [];
+      renderStories(false);
+    }
+  } else {
+    renderStories(loadMore);
+  }
 
   try {
     let q = query(collection(db, 'stories'), where('approved', '==', true));

@@ -495,7 +495,7 @@ class AppSidebar extends HTMLElement {
     });
     this.shadowRoot.querySelector('[data-action="theme"]')?.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
-      import(new URL('../store.js', import.meta.url).href).then(m => m.toggleTheme());
+      import('../store.js').then(m => m.toggleTheme());
     });
     this.shadowRoot.querySelector('[data-action="gold-history"]')?.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
