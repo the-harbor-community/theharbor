@@ -104,6 +104,34 @@ async function startServer() {
     }
   });
 
+  // API Route: Reflect Story
+  app.post('/api/gemini/reflect', async (req, res) => {
+    try {
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const text = typeof body.text === 'string' ? body.text.trim().slice(0, 12000) : '';
+      if (!text) {
+        return res.status(400).json({ error: 'Text is required' });
+      }
+
+      const ai = getGemini();
+      const promptText = `Provide a warm, highly empathetic, and supportive AI reflection for the following anonymous story. Focus on validating their emotions, offering deep insight or a new perspective, and suggesting a gentle reflective question or next step. Keep the response around 2 to 3 sentences, comforting and gentle. Do not use markdown headers, lists, or bolding. Keep it pure plain text.
+Story text: ${text}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: promptText,
+      });
+
+      const reflection = typeof response.text === 'string' && response.text.trim()
+        ? response.text.trim()
+        : (response.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || '').join('').trim() || 'Reflection unavailable');
+      res.json({ reflection });
+    } catch (err: any) {
+      console.error('Reflect error:', err);
+      res.status(500).json({ error: err?.message || 'AI Reflection failed' });
+    }
+  });
+
   // Serve static files from workspace root in development, or dist/ in production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -12,38 +12,55 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
     function isOwner(userId) {
-      return request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
 
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'mursalinkabir9222@gmail.com' ||
-        request.auth.token.email == 'asurausa922@gmail.com' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
-      );
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
 
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    function isAuthenticated() {
-      return request.auth != null;
+    // Validation Blueprint: Users
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() <= 128
+        && data.name is string && data.name.size() <= 100
+        && data.email is string && data.email.size() <= 150
+        && data.gender is string && data.gender.size() <= 100
+        && data.country is string && data.country.size() <= 100
+        && data.goldBalance is int;
     }
 
-    function isOwnerAlt(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    // Validation Blueprint: Stories
+    function isValidStory(data) {
+      return data.title is string && data.title.size() <= 100
+        && data.category is string && data.category.size() <= 100
+        && data.userId == request.auth.uid
+        && data.authorId == request.auth.uid
+        && data.commentCount is int
+        && data.goldReceived is int;
     }
 
-    // FIXED: Proper user creation validation
-    function isValidProfileWrite(userId) {
-      return isAuthenticated() && userId == request.auth.uid;
+    // Validation Blueprint: Comments
+    function isValidComment(data) {
+      return data.storyId is string && data.storyId.size() <= 128
+        && data.text is string && data.text.size() <= 2000
+        && data.authorId == request.auth.uid
+        && data.userId == request.auth.uid
+        && data.replyCount is int
+        && data.approved is bool;
     }
 
     // Cross-user operations from original rules
     function isCrossUserLikesChange(userId) {
-      return isAuthenticated()
+      return isSignedIn()
         && request.auth.uid != userId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesReceived'])
         && (request.resource.data.likesReceived == resource.data.get('likesReceived', 0) + 1
@@ -51,7 +68,7 @@ service cloud.firestore {
     }
 
     function isCrossUserGoldReceivedIncrement(userId) {
-      return isAuthenticated()
+      return isSignedIn()
         && request.auth.uid != userId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['goldReceived'])
         && request.resource.data.goldReceived > resource.data.get('goldReceived', 0)
@@ -59,7 +76,7 @@ service cloud.firestore {
     }
 
     function isCrossUserFollowChange(userId) {
-      return isAuthenticated()
+      return isSignedIn()
         && request.auth.uid != userId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followers', 'following'])
         && (request.resource.data.followers == resource.data.followers
@@ -80,29 +97,29 @@ service cloud.firestore {
     function storyLedgerOnlyUpdate() {
       return storyContentUnchanged()
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['reactions', 'goldReceived', 'totalGold', 'commentCount', 'loveCount', 'likes', 'goldDonations', 'donations', 'approved', 'visibility']);
+          .hasOnly(['reactions', 'goldReceived', 'totalGold', 'commentCount', 'loveCount', 'likes', 'goldDonations', 'donations', 'approved', 'visibility', 'pinnedCommentId']);
     }
 
     // Comment helper functions
     function isReplyCountIncrement() {
-      return isAuthenticated()
+      return isSignedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['replyCount'])
         && request.resource.data.replyCount == resource.data.replyCount + 1;
     }
 
     function isCommentReactionUpdate() {
-      return isAuthenticated()
+      return isSignedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
     }
 
     // ---------- USERS COLLECTION ----------
     match /users/{userId} {
-      allow read: if resource.data.isPublic == true || (isSignedIn() && (isOwner(userId) || isAdmin()));
+      allow read: if isSignedIn();
       
-      // FIXED: Create user with proper validation
-      allow create: if isAuthenticated() && userId == request.auth.uid;
+      // Allow profile creation during sign-up (before email verification is finished)
+      allow create: if isSignedIn() && userId == request.auth.uid && isValidUser(request.resource.data) && request.resource.data.isAdmin == false;
       
-      allow update: if isSignedIn() && (
+      allow update: if isSignedIn() && isValidUser(request.resource.data) && (
         isOwner(userId) || 
         isAdmin() || 
         isCrossUserLikesChange(userId) ||
@@ -112,21 +129,25 @@ service cloud.firestore {
         // Prevent upgrading to admin unless already an admin
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) || request.resource.data.get('isAdmin', false) == false || (resource != null && resource.data.get('isAdmin', false) == true) || isAdmin())
       );
-      allow delete: if isSignedIn() && (isOwner(userId) || isAdmin());
+      
+      allow delete: if isVerified() && (isOwner(userId) || isAdmin());
 
       // User Bookmarks Subcollection
       match /bookmarks/{bookmarkId} {
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        allow read: if isVerified() && request.auth.uid == userId;
+        allow write: if isVerified() && request.auth.uid == userId && isValidId(bookmarkId);
       }
 
       // User Reactions Subcollection
       match /reactions/{reactionId} {
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        allow read: if isVerified() && request.auth.uid == userId;
+        allow write: if isVerified() && request.auth.uid == userId && isValidId(reactionId);
       }
 
       // User Comment Reactions Subcollection
       match /commentReactions/{reactionId} {
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        allow read: if isVerified() && request.auth.uid == userId;
+        allow write: if isVerified() && request.auth.uid == userId && isValidId(reactionId);
       }
     }
 
@@ -139,11 +160,11 @@ service cloud.firestore {
         )
       ) || (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin()));
       
-      allow create: if isAuthenticated()
-        && request.resource.data.authorId == request.auth.uid
-        && request.resource.data.userId == request.auth.uid;
+      allow create: if isVerified()
+        && isValidId(storyId)
+        && isValidStory(request.resource.data);
       
-      allow update: if isSignedIn() && (
+      allow update: if isVerified() && isValidStory(request.resource.data) && (
         resource.data.userId == request.auth.uid || 
         resource.data.authorId == request.auth.uid || 
         isAdmin() ||
@@ -153,23 +174,29 @@ service cloud.firestore {
             'reactions', 'commentCount', 'goldReceived', 'totalGold', 'pinnedCommentId'
           ])
         )
+      ) && (
+        // Enforce approval state remains intact unless modified by an Admin
+        request.resource.data.approved == resource.data.approved || isAdmin()
       );
       
-      allow delete: if (isSignedIn() && (resource.data.userId == request.auth.uid || storyAuthorId(resource.data) == request.auth.uid)) || isAdmin();
+      allow delete: if (isVerified() && (resource.data.userId == request.auth.uid || storyAuthorId(resource.data) == request.auth.uid)) || isAdmin();
 
       // Edit History Subcollection
       match /editHistory/{historyId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated()
+        allow read: if isVerified();
+        allow create: if isVerified()
+          && isValidId(historyId)
           && storyAuthorId(get(/databases/$(database)/documents/stories/$(storyId)).data) == request.auth.uid;
         allow update, delete: if false;
       }
 
       // Comments Subcollection under Stories
       match /comments/{commentId} {
-        allow create: if isAuthenticated()
-          && request.resource.data.authorId == request.auth.uid;
-        allow update, delete: if isAuthenticated()
+        allow create: if isVerified()
+          && isValidId(commentId)
+          && isValidComment(request.resource.data)
+          && exists(/databases/$(database)/documents/stories/$(storyId));
+        allow update, delete: if isVerified()
           && (resource.data.authorId == request.auth.uid || resource.data.userId == request.auth.uid)
           || isAdmin();
       }
@@ -178,9 +205,12 @@ service cloud.firestore {
     // ---------- COMMENTS (top-level) ----------
     match /comments/{commentId} {
       allow read: if true;
-      allow create: if isSignedIn() && (request.resource.data.userId == request.auth.uid || request.resource.data.authorId == request.auth.uid);
+      allow create: if isVerified()
+        && isValidId(commentId)
+        && isValidComment(request.resource.data)
+        && exists(/databases/$(database)/documents/stories/$(request.resource.data.storyId));
       
-      allow update: if isSignedIn() && (
+      allow update: if isVerified() && (
         isAdmin() ||
         (get(/databases/$(database)/documents/stories/$(resource.data.storyId)).data.userId == request.auth.uid) ||
         (get(/databases/$(database)/documents/stories/$(resource.data.storyId)).data.authorId == request.auth.uid) ||
@@ -191,7 +221,7 @@ service cloud.firestore {
         isCommentReactionUpdate()
       );
       
-      allow delete: if isSignedIn() && (
+      allow delete: if isVerified() && (
         resource.data.userId == request.auth.uid || 
         resource.data.authorId == request.auth.uid || 
         isAdmin() ||
@@ -202,8 +232,8 @@ service cloud.firestore {
 
     // Nested comments under any path
     match /{path=**}/comments/{commentId} {
-      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
-      allow update, delete: if isAuthenticated()
+      allow create: if isVerified() && isValidId(commentId) && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if isVerified()
         && (resource.data.authorId == request.auth.uid || resource.data.userId == request.auth.uid)
         || isAdmin();
     }
@@ -211,15 +241,16 @@ service cloud.firestore {
     // ---------- LOVE LEADERBOARD ----------
     match /loveLeaderboard/{userId} {
       allow read: if true;
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() 
+      allow create: if isVerified() && isValidId(userId);
+      allow update: if isVerified() 
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['totalPoints', 'updatedAt', 'userId', 'authorId', 'userName'])
         && (request.resource.data.totalPoints - resource.data.get('totalPoints', 0)) in [-1, 1];
       allow delete: if false;
 
       match /events/{eventId} {
         allow read: if true;
-        allow create: if isAuthenticated()
+        allow create: if isVerified()
+          && isValidId(eventId)
           && request.resource.data.userId == userId
           && request.resource.data.authorId == userId
           && request.resource.data.reactorUid == request.auth.uid;
@@ -229,21 +260,22 @@ service cloud.firestore {
 
     // ---------- NOTIFICATIONS ----------
     match /notifications/{notifId} {
-      allow read: if isSignedIn() && resource.data.toUid == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.fromUid == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.toUid == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.toUid == request.auth.uid;
+      allow read: if isVerified() && resource.data.toUid == request.auth.uid;
+      allow create: if isVerified() && (request.resource.data.fromUid == request.auth.uid || (request.resource.data.fromUid == 'creator' && request.resource.data.toUid == request.auth.uid));
+      allow update: if isVerified() && resource.data.toUid == request.auth.uid;
+      allow delete: if isVerified() && resource.data.toUid == request.auth.uid;
     }
 
     // ---------- DAILY CLAIMS ----------
     match /dailyClaims/{uid} {
-      allow read, write: if isOwnerAlt(uid);
+      allow read, write: if isVerified() && isOwner(uid);
     }
 
     // ---------- GOLD TRANSACTIONS ----------
     match /goldTransactions/{txId} {
-      allow read: if isSignedIn() && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() 
+      allow read: if isVerified() && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid || isAdmin());
+      allow create: if isVerified() 
+        && isValidId(txId)
         && request.resource.data.fromUid == request.auth.uid
         && request.resource.data.authorId is string;
       allow update, delete: if false;
@@ -252,8 +284,8 @@ service cloud.firestore {
     // ---------- SUGGESTIONS ----------
     match /suggestions/{suggestionId} {
       allow read: if true;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() 
+      allow create: if isVerified() && isValidId(suggestionId) && request.resource.data.userId == request.auth.uid;
+      allow update: if isVerified() 
         && (resource.data.userId == request.auth.uid || isAdmin());
       allow delete: if isAdmin();
     }
@@ -261,7 +293,7 @@ service cloud.firestore {
     // ---------- BUG COLLECTIONS ----------
     match /bug-fix/{bugId} {
       allow read: if true;
-      allow create: if isAuthenticated();
+      allow create: if isVerified() && isValidId(bugId);
       allow update, delete: if isAdmin();
     }
     
@@ -272,15 +304,15 @@ service cloud.firestore {
     }
     
     match /bugs/{bugId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow read: if isVerified() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isVerified() && isValidId(bugId) && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isAdmin();
     }
 
     // ---------- FLAGGED REPORTS ----------
     match /flaggedReports/{id} {
       allow read: if isAdmin();
-      allow create: if isSignedIn();
+      allow create: if isVerified() && isValidId(id);
       allow update, delete: if isAdmin();
     }
 
@@ -297,15 +329,15 @@ service cloud.firestore {
     // ---------- REPORTS ----------
     match /reports/{reportId} {
       allow read: if isAdmin();
-      allow create: if isSignedIn() && request.resource.data.reportedBy == request.auth.uid;
+      allow create: if isVerified() && isValidId(reportId) && request.resource.data.reportedBy == request.auth.uid;
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
     // ---------- DONATIONS ----------
     match /donations/{donationId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow read: if isVerified() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isVerified() && isValidId(donationId) && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isAdmin();
     }
   }

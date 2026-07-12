@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The Harbor - Redirecting...</title>
+  <script type="text/javascript">
+    (function() {
+      var l = window.location;
+      // Detect if we are in a subdirectory subfolder (standard for username.github.io/repository/)
+      var pathParts = l.pathname.split('/').filter(Boolean);
+      var isSubfolder = pathParts.length > 0 && !l.hostname.includes('localhost') && !l.hostname.includes('run.app') && !l.hostname.includes('127.0.0.1');
+      var repoName = isSubfolder ? '/' + pathParts[0] : '';
+
+      // Get the requested virtual path relative to the repository root
+      var path = l.pathname;
+      if (repoName && path.indexOf(repoName) === 0) {
+        path = path.substring(repoName.length);
+      }
+
+      // Convert the path into a key/filename to align with The Harbor's router
+      var cleanPath = path.replace(/^\//, '').replace(/\/$/, '');
+      if (cleanPath === '' || cleanPath === 'index.html') {
+        l.replace((repoName || '') + '/index.html#welcome');
+        return;
+      }
+
+      // Reconstruct the destination as a clean hash route
+      var targetHash = '#' + cleanPath + l.search + l.hash;
+      l.replace((repoName || '') + '/index.html' + targetHash);
+    })();
+  </script>
+</head>
+<body>
+  <p>Redirecting to The Harbor...</p>
+</body>
+</html>
