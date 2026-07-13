@@ -1,5 +1,6 @@
 /**
  * Activity page — view contribution history, reactions, and gold donations
+ * Refactored with persistent shell – no flicker.
  */
 import { getState, t, navigateTo, subscribe, showToast } from '../store.js';
 import { registerPageSubscription } from '../router.js';
@@ -7,13 +8,20 @@ import { db, collection } from '../firebase.js';
 import { getDocs, query, where, getDoc, doc } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
 import { initBugReport } from '../page-common.js';
 import { guardAuth } from './shared.js';
+import { createPageShell } from '../utils/page-shell.js';
+import { detectCurrentPageKey, onPageEnter } from '../router.js';
 
-let activeTab = 'all'; // 'all', 'stories', 'comments', 'likes', 'gold'
+let activeTab = 'all';
 let stories = [];
 let comments = [];
 let goldTransactions = [];
 let reactedStories = [];
 let loading = true;
+
+// 🔥 Persistent shell & fetch locks
+let _mounted = false;
+let _fetching = false;
+let pageShell = null;
 
 function el(id) { return document.getElementById(id); }
 function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
@@ -43,39 +51,14 @@ function renderTabs() {
 }
 
 function renderContent() {
-  const container = el('activity-root');
+  const container = el('activity-dynamic-content');
   if (!container) return;
 
-  // Ensure base layout with tabs container and list container exists exactly once
-  let listContainer = el('activity-list');
-  let tabsContainer = el('activity-tabs-container');
-  if (!listContainer || !tabsContainer) {
-    const mainBuffer = document.createElement('div');
-    mainBuffer.innerHTML = `
-      <div class="page-header">
-        <h1>📊 ${t('activity_heading', 'My Activity')}</h1>
-        <p>Review your contributions and interactions in The Harbor community.</p>
-      </div>
-      <div id="activity-tabs-container">${renderTabs()}</div>
-      <div id="activity-list" style="margin-top:var(--space-md)"></div>
-    `;
-    container.replaceChildren(...mainBuffer.childNodes);
-    listContainer = el('activity-list');
-    tabsContainer = el('activity-tabs-container');
-  } else {
-    const tabsBuffer = document.createElement('div');
-    tabsBuffer.innerHTML = renderTabs();
-    tabsContainer.replaceChildren(...tabsBuffer.childNodes);
-  }
-
-  const listBuffer = document.createElement('div');
-
   if (loading) {
-    listBuffer.innerHTML = `
+    container.innerHTML = `
       <div class="page-skeleton" style="margin-bottom:var(--space-sm)"></div>
       <div class="page-skeleton" style="margin-bottom:var(--space-sm)"></div>
     `;
-    listContainer.replaceChildren(...listBuffer.childNodes);
     return;
   }
 
@@ -213,6 +196,7 @@ function renderContent() {
   if (activeTab === 'likes' && items.length === 0) emptyMsg = t('activity_no_likes', 'No likes received yet');
   if (activeTab === 'gold' && goldTransactions.length === 0) emptyMsg = t('activity_no_gold', 'No gold received yet');
 
+  const listBuffer = document.createElement('div');
   listBuffer.innerHTML = items.length > 0 
     ? items.map(it => it.html).join('') 
     : `<div class="page-empty card">${emptyMsg}</div>`;
@@ -241,31 +225,34 @@ function renderContent() {
   });
 
   // Atomically swap the list content
-  listContainer.replaceChildren(...listBuffer.childNodes);
+  container.replaceChildren(...listBuffer.childNodes);
 
-  // Bind tab click events (always on active tabsContainer)
-  tabsContainer.querySelectorAll('.page-tab').forEach(tab => {
-    tab.addEventListener('click', (e) => {
-      e.preventDefault();
-      activeTab = tab.dataset.tab;
-      renderContent();
+  // Bind tab click events
+  const tabsContainer = el('activity-tabs-container');
+  if (tabsContainer) {
+    tabsContainer.querySelectorAll('.page-tab').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        e.preventDefault();
+        activeTab = tab.dataset.tab;
+        // Update tab active classes visually
+        tabsContainer.querySelectorAll('.page-tab').forEach(b => {
+          b.classList.toggle('active', b.dataset.tab === activeTab);
+        });
+        renderContent();
+      });
     });
-  });
+  }
 }
 
 async function fetchActivity() {
-  const { user } = getState();
-  if (!user) return;
+  if (_fetching) return;
+  _fetching = true;
 
-  let isBackground = false;
-  if (stories.length > 0 || comments.length > 0) {
-    loading = false;
-    isBackground = true;
-    renderContent();
-  } else {
-    loading = true;
-    renderContent();
-  }
+  const { user } = getState();
+  if (!user) { _fetching = false; return; }
+
+  loading = true;
+  renderContent();
 
   try {
     // 1. Fetch user's stories
@@ -331,13 +318,46 @@ async function fetchActivity() {
 
   loading = false;
   renderContent();
+  _fetching = false;
 }
 
 function init() {
+  if (_mounted) return;
+  _mounted = true;
+
+  // Build persistent shell
+  if (!pageShell) {
+    pageShell = createPageShell('activity-root', `
+      <div class="page-header">
+        <h1>📊 ${t('activity_heading', 'My Activity')}</h1>
+        <p>Review your contributions and interactions in The Harbor community.</p>
+      </div>
+      <div id="activity-tabs-container">${renderTabs()}</div>
+      <div id="activity-dynamic-content" style="margin-top:var(--space-md)"></div>
+    `);
+  }
+
   initBugReport();
+  
   const unsub = subscribe('user', fetchActivity);
   registerPageSubscription(unsub);
+  
+  // Set up tab switching
+  const tabsContainer = el('activity-tabs-container');
+  if (tabsContainer) {
+    tabsContainer.querySelectorAll('.page-tab').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        e.preventDefault();
+        activeTab = tab.dataset.tab;
+        tabsContainer.querySelectorAll('.page-tab').forEach(b => {
+          b.classList.toggle('active', b.dataset.tab === activeTab);
+        });
+        renderContent();
+      });
+    });
+  }
+  
   fetchActivity();
 }
 
-guardAuth(init, 'activity');
+onPageEnter('activity', init);
