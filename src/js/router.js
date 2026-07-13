@@ -338,14 +338,6 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
   navigating = true;
 
   try {
-    const originalMain = document.getElementById('main-content');
-    if (originalMain) {
-      originalMain.style.pointerEvents = 'none';
-      originalMain.style.opacity = '0';
-      // Wait for smooth fade-out transition before clearing content
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-
     const { replace = false, skipPush = false } = opts;
     const file = KEY_TO_FILE[pageKey];
     if (!file) throw new Error(`Unknown page: ${pageKey}`);
@@ -373,6 +365,7 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
 
     if (isPrivatePage && (!getState().user || !getState().user.emailVerified)) {
       softNavigate('welcome', {}, { replace: true });
+      navigating = false;
       return;
     }
     
@@ -403,30 +396,36 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
       doc = parsedDoc.cloneNode(true);
     }
 
+    // 🔥 FIX: Do NOT hide the main content or delay – just mark it as transitioning
+    const main = document.getElementById('main-content');
+    if (main) {
+      main.dataset.transitioning = 'true';
+    }
+
     if (doc.title) document.title = doc.title;
     syncBodyClass(doc);
     await syncPageCss(doc);
     await ensureModule(pageKey);
 
-    // Dispose old view and clear event subscriptions ONLY when new page is fully ready
     disposeGlobalView();
 
-    const main = document.getElementById('main-content');
     swapMainContent(doc);
     if (main) {
       translatePage(main);
-      main.style.opacity = '0';
-      main.style.pointerEvents = 'none';
-      // Force a browser reflow to guarantee the opacity change is captured
-      main.offsetHeight; 
     }
 
-    invokePageHandler(pageKey);
+    const pageLoadPromise = (async () => {
+      await invokePageHandler(pageKey);
+    })();
 
+    await Promise.race([
+      pageLoadPromise,
+      new Promise(resolve => setTimeout(resolve, 300))
+    ]);
+
+    // 🔥 FIX: Remove the transitioning flag – the content is now fully rendered
     if (main) {
-      main.offsetHeight; // Force another reflow before fading in
-      main.style.opacity = '1';
-      main.style.pointerEvents = '';
+      delete main.dataset.transitioning;
     }
 
     playTone('SECTION_TRANSITION');
@@ -438,8 +437,7 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
     console.error('Navigation error:', err);
     const main = document.getElementById('main-content');
     if (main) {
-      main.style.opacity = '1';
-      main.style.pointerEvents = '';
+      delete main.dataset.transitioning;
     }
   } finally {
     navigating = false;
