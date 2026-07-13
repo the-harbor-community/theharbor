@@ -28,7 +28,6 @@ const FILE_TO_KEY = {
 
 const KEY_TO_FILE = Object.fromEntries(Object.entries(FILE_TO_KEY).map(([f, k]) => [k, f]));
 
-// 🔥 AUTO-DETECT: Works on ANY repo - root or subdirectory
 const getBasePath = () => {
   const pathname = window.location.pathname;
   if (pathname === '/' || pathname === '') return '';
@@ -86,10 +85,6 @@ const pageCleanups = [];
 export function registerPageSubscription(unsub) {
   if (typeof unsub === 'function') {
     pageSubscriptions.push(unsub);
-    const registry = window.cleanupRegistry || [];
-    if (!registry.includes(unsub)) {
-      registry.push(unsub);
-    }
   }
 }
 
@@ -109,10 +104,6 @@ export function clearPageSubscriptions() {
 export function registerPageCleanup(fn) {
   if (typeof fn === 'function') {
     pageCleanups.push(fn);
-    const registry = window.cleanupRegistry || [];
-    if (!registry.includes(fn)) {
-      registry.push(fn);
-    }
   }
 }
 
@@ -133,7 +124,6 @@ export function parseHash() {
   const hash = window.location.hash || '';
   const cleanHash = hash.replace(/^#\/?/, '');
   
-  // 🔥 FIX: Default to welcome if no hash - Works on ANY repo
   if (!cleanHash) {
     return { pageKey: 'welcome', params: {} };
   }
@@ -274,12 +264,16 @@ async function ensureModule(pageKey) {
   if (loader) await loader();
 }
 
-function invokePageHandler(pageKey) {
+async function invokePageHandler(pageKey) {
   const fn = pageHandlers.get(pageKey);
   if (fn) {
-    const unsub = fn();
-    if (unsub && typeof unsub === 'function') {
-      registerPageSubscription(unsub);
+    try {
+      const unsub = await fn();
+      if (unsub && typeof unsub === 'function') {
+        registerPageSubscription(unsub);
+      }
+    } catch (e) {
+      console.warn('Error during page handler execution:', e);
     }
   }
   window.dispatchEvent(new CustomEvent('harbor:route', { detail: { page: pageKey } }));
@@ -324,10 +318,9 @@ export function disposeGlobalView() {
   }
 
   const main = document.getElementById('main-content');
-  if (!main) return;
-
-  const cleanMain = main.cloneNode(false);
-  main.replaceWith(cleanMain);
+  if (main) {
+    main.replaceChildren();
+  }
 
   clearPageSubscriptions();
   clearPageCleanups();
@@ -446,7 +439,7 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
 
 export async function softNavigate(pageKey, params = {}, opts = {}) {
   const state = getState();
-  let activePageKey = (pageKey !== undefined && pageKey !== null) ? pageKey : 'welcome';  // 🔥 FIX: Default to welcome
+  let activePageKey = (pageKey !== undefined && pageKey !== null) ? pageKey : 'welcome';
   if (activePageKey === 'en' || activePageKey === 'us') {
     activePageKey = 'welcome';
   }
@@ -474,10 +467,7 @@ export async function softNavigate(pageKey, params = {}, opts = {}) {
 
   const currentHash = window.location.hash || '';
   if (currentHash === targetUrl) {
-    // Already on the same page! Scroll to top smoothly instead of tearing down DOM and flashing
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    
-    // Close any open search dropdowns
     document.querySelectorAll('.search-results-dropdown').forEach(d => {
       if (d instanceof HTMLElement) d.style.display = 'none';
     });
@@ -597,7 +587,6 @@ export function initRouter() {
   if (routerReady) return;
   routerReady = true;
 
-  // SPA Enforcer: Redirect pathname to hash routing
   const path = window.location.pathname;
   const file = path.split('/').pop() || 'index.html';
   if (file !== 'index.html' && file !== '' && FILE_TO_KEY[file]) {
@@ -610,7 +599,6 @@ export function initRouter() {
     return;
   }
 
-  // Register hashchange event listener
   window.addEventListener('hashchange', () => {
     const { pageKey, params } = parseHash();
     
@@ -624,10 +612,8 @@ export function initRouter() {
     performNavigation(pageKey, params, window.location.hash, { skipPush: true });
   });
 
-  // 🔥 FIX: Initial load - default to #welcome if no hash
   const { pageKey, params } = parseHash();
   
-  // If no hash, redirect to #welcome
   if (!window.location.hash) {
     window.location.hash = '#welcome';
     return;
@@ -635,13 +621,11 @@ export function initRouter() {
 
   performNavigation(pageKey, params, window.location.hash, { skipPush: true });
 
-  // Add global beforeunload protection
   window.addEventListener('beforeunload', (e) => {
     e.preventDefault();
     e.returnValue = '';
   });
 
-  // Speculative Navigation Dwell Timer Vector tracking
   let hoverTimeout = null;
   document.addEventListener('mouseover', (e) => {
     const anchor = e.target.closest?.('a');
