@@ -217,7 +217,7 @@ class AppStoryCard extends HTMLElement {
       </div>`;
 
     this._elements = {
-      goldBadge: this._article.querySelector('.gold-badge'),
+      goldBadge: this._article.querySelector('#gold-badge'),
       viewsBadge: this._article.querySelector('#views-badge'),
       viewsCount: this._article.querySelector('#views-count'),
       commentsBadge: this._article.querySelector('#comments-badge'),
@@ -232,9 +232,22 @@ class AppStoryCard extends HTMLElement {
     const el = this._elements;
     if (!el) return;
 
-    if (name === 'gold' && el.goldBadge) {
+    if (name === 'gold') {
       const num = parseInt(value) || 0;
-      el.goldBadge.textContent = `🪙 ${num} GOLD`;
+      let badge = this._article.querySelector('#gold-badge');
+      if (num > 0) {
+        if (!badge) {
+          badge = document.createElement('div');
+          badge.className = 'gold-badge';
+          badge.id = 'gold-badge';
+          this._article.prepend(badge);
+          el.goldBadge = badge;
+        }
+        badge.textContent = `🪙 ${num} GOLD`;
+      } else if (badge) {
+        badge.remove();
+        el.goldBadge = null;
+      }
     }
     if (name === 'comments' && el.commentsBadge) {
       el.commentsBadge.textContent = `💬 ${value}`;
