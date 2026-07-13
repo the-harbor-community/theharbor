@@ -389,12 +389,8 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
       doc = parsedDoc.cloneNode(true);
     }
 
-    // 🔥 FIX: Do NOT hide the main content or delay – just mark it as transitioning
+    // Swapping instantly with ZERO opacity hiding and ZERO timers
     const main = document.getElementById('main-content');
-    if (main) {
-      main.dataset.transitioning = 'true';
-    }
-
     if (doc.title) document.title = doc.title;
     syncBodyClass(doc);
     await syncPageCss(doc);
@@ -407,19 +403,7 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
       translatePage(main);
     }
 
-    const pageLoadPromise = (async () => {
-      await invokePageHandler(pageKey);
-    })();
-
-    await Promise.race([
-      pageLoadPromise,
-      new Promise(resolve => setTimeout(resolve, 300))
-    ]);
-
-    // 🔥 FIX: Remove the transitioning flag – the content is now fully rendered
-    if (main) {
-      delete main.dataset.transitioning;
-    }
+    await invokePageHandler(pageKey);
 
     playTone('SECTION_TRANSITION');
 
@@ -428,10 +412,6 @@ async function performNavigation(pageKey, params, targetUrl, opts = {}) {
     }
   } catch (err) {
     console.error('Navigation error:', err);
-    const main = document.getElementById('main-content');
-    if (main) {
-      delete main.dataset.transitioning;
-    }
   } finally {
     navigating = false;
   }
@@ -505,10 +485,6 @@ export function handleSPARouteChange(href) {
 export function refreshCurrentPage() {
   const { pageKey, params } = parseHash();
   return performNavigation(pageKey, params, window.location.hash, { skipPush: true });
-}
-
-function handlePopState(e) {
-  // Let hashchange event handle hash-based routes
 }
 
 export function interceptAnchorClick(event) {
