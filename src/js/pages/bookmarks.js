@@ -1,15 +1,22 @@
 /**
  * Bookmarks page — view and manage saved stories
+ * Refactored with persistent shell – no flicker.
  */
 import { getState, t, navigateTo, subscribe, showToast } from '../store.js';
-import { registerPageSubscription, detectCurrentPageKey } from '../router.js';
+import { registerPageSubscription, detectCurrentPageKey, onPageEnter } from '../router.js';
 import { db, doc } from '../firebase.js';
 import { getDoc } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
 import { initBugReport } from '../page-common.js';
 import { guardAuth } from './shared.js';
+import { createPageShell } from '../utils/page-shell.js';
 
 let bookmarkedStories = [];
 let loading = true;
+
+// 🔥 Persistent shell & fetch locks
+let _mounted = false;
+let _fetching = false;
+let pageShell = null;
 
 function el(id) { return document.getElementById(id); }
 function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
@@ -29,52 +36,22 @@ function formatTimeAgo(dateInput) {
 }
 
 function renderContent() {
-  const container = el('bookmarks-root');
+  const container = el('bookmarks-dynamic-content');
   if (!container) return;
 
   if (loading) {
     container.innerHTML = `
-      <div class="page-header" style="margin-bottom: var(--space-md);">
-        <h1>🔖 ${t('saved_stories_title', 'Saved Bookmarks')}</h1>
-        <p>Your curated list of saved stories and expressions.</p>
-      </div>
       <div class="page-skeleton" style="height: 12rem; margin-bottom: var(--space-md); border-radius: var(--radius-md);"></div>
       <div class="page-skeleton" style="height: 12rem; margin-bottom: var(--space-md); border-radius: var(--radius-md);"></div>
     `;
     return;
   }
 
-  container.innerHTML = `
-    <div class="page-header" style="margin-bottom: var(--space-md); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-sm);">
-      <div>
-        <h1 style="margin: 0;">🔖 ${t('saved_stories_title', 'Saved Bookmarks')} (${bookmarkedStories.length})</h1>
-        <p style="margin: 0.25rem 0 0; color: var(--text-secondary); font-size: var(--text-xs);">
-          Your personal library of saved harbor stories.
-        </p>
-      </div>
-      <button class="btn btn--secondary btn--sm" id="back-profile-btn" style="margin: 0;">👤 Back to Profile</button>
-    </div>
-    <div id="bookmarks-list" style="display: flex; flex-direction: column; gap: var(--space-md);">
-      <!-- Story cards will be rendered here -->
-    </div>
-  `;
-
-  // Bind back button
-  el('back-profile-btn')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    const { user } = getState();
-    if (user) {
-      navigateTo('profile', { uid: user.uid });
-    } else {
-      navigateTo('profile');
-    }
-  });
-
-  const listContainer = el('bookmarks-list');
-  if (!listContainer) return;
+  // Build the list
+  const listBuffer = document.createElement('div');
 
   if (bookmarkedStories.length === 0) {
-    listContainer.innerHTML = `
+    listBuffer.innerHTML = `
       <div class="page-empty card" style="text-align: center; padding: var(--space-xl); color: var(--text-muted);">
         <span style="font-size: 3rem; display: block; margin-bottom: var(--space-sm);">🔖</span>
         <h3 style="margin: 0; font-weight: 700; color: var(--text-primary);">${t('no_bookmarks_yet', 'No saved stories yet.')}</h3>
@@ -83,46 +60,46 @@ function renderContent() {
         </p>
       </div>
     `;
-    return;
+  } else {
+    const { user } = getState();
+    bookmarkedStories.forEach((story, index) => {
+      const card = document.createElement('app-story-card');
+      card.setAttribute('story-id', story.id);
+      card.setAttribute('author-id', story.userId || '');
+      card.setAttribute('user-id', story.userId || '');
+      card.setAttribute('title', story.title || '');
+      card.setAttribute('text', story.text || '');
+      card.setAttribute('author', story.authorName || t('anonymous', 'Anonymous'));
+      card.setAttribute('category', story.category || 'general');
+      card.setAttribute('date', formatTimeAgo(story.createdAt));
+      if (story.isAnonymous) card.setAttribute('anonymous', '');
+      card.setAttribute('gold', String(story.totalGold || story.goldReceived || 0));
+      card.setAttribute('comments', String(story.commentCount || 0));
+      card.setAttribute('views', String(story.views || 0));
+      card.setAttribute('bookmarked', '');
+
+      card.style.animationDelay = `${Math.min(index * 0.05, 0.4)}s`;
+
+      listBuffer.appendChild(card);
+
+      card.setReactions(story.reactions || {}, [], () => {});
+      card.showGoldButton(user && story.userId !== user.uid);
+      card.setNavigateHandler((id) => navigateTo('story', { id }));
+    });
   }
 
-  const { user } = getState();
-
-  bookmarkedStories.forEach((story, index) => {
-    const card = document.createElement('app-story-card');
-    card.setAttribute('story-id', story.id);
-    card.setAttribute('author-id', story.userId || '');
-    card.setAttribute('user-id', story.userId || '');
-    card.setAttribute('title', story.title || '');
-    card.setAttribute('text', story.text || '');
-    card.setAttribute('author', story.authorName || t('anonymous', 'Anonymous'));
-    card.setAttribute('category', story.category || 'general');
-    card.setAttribute('date', formatTimeAgo(story.createdAt));
-    if (story.isAnonymous) card.setAttribute('anonymous', '');
-    card.setAttribute('gold', String(story.totalGold || story.goldReceived || 0));
-    card.setAttribute('comments', String(story.commentCount || 0));
-    card.setAttribute('views', String(story.views || 0));
-    card.setAttribute('bookmarked', '');
-
-    // Highlight own story if desired
-    card.style.animationDelay = `${Math.min(index * 0.05, 0.4)}s`;
-
-    listContainer.appendChild(card);
-
-    // Setup reactions empty/state handling
-    const userReactions = {}; // simple empty reactions or state if needed
-    card.setReactions(story.reactions || {}, userReactions[story.id] || [], () => {});
-    card.showGoldButton(user && story.userId !== user.uid);
-    card.setNavigateHandler((id) => navigateTo('story', { id }));
-  });
+  container.replaceChildren(...listBuffer.childNodes);
 }
 
 async function loadBookmarkedStories() {
+  if (_fetching) return;
+  _fetching = true;
+
   loading = true;
   renderContent();
 
   try {
-    // 1. Retrieve bookmarked IDs from localStorage as explicitly requested
+    // 1. Retrieve bookmarked IDs from localStorage
     let bookmarkedIds = [];
     const localSaved = localStorage.getItem('harbor_bookmarks');
     if (localSaved) {
@@ -142,6 +119,7 @@ async function loadBookmarkedStories() {
       bookmarkedStories = [];
       loading = false;
       renderContent();
+      _fetching = false;
       return;
     }
 
@@ -171,11 +149,44 @@ async function loadBookmarkedStories() {
 
   loading = false;
   renderContent();
+  _fetching = false;
 }
 
 function init() {
+  if (_mounted) return;
+  _mounted = true;
+
+  // Build persistent shell
+  if (!pageShell) {
+    pageShell = createPageShell('bookmarks-root', `
+      <div class="page-header" style="margin-bottom: var(--space-md); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-sm);">
+        <div>
+          <h1 style="margin: 0;">🔖 ${t('saved_stories_title', 'Saved Bookmarks')} <span id="bookmark-count">(0)</span></h1>
+          <p style="margin: 0.25rem 0 0; color: var(--text-secondary); font-size: var(--text-xs);">
+            Your personal library of saved harbor stories.
+          </p>
+        </div>
+        <button class="btn btn--secondary btn--sm" id="back-profile-btn" style="margin: 0;">👤 Back to Profile</button>
+      </div>
+      <div id="bookmarks-dynamic-content" style="display: flex; flex-direction: column; gap: var(--space-md);">
+        <!-- Story cards will be rendered here -->
+      </div>
+    `);
+  }
+
   initBugReport();
-  
+
+  // Bind back button
+  document.getElementById('back-profile-btn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const { user } = getState();
+    if (user) {
+      navigateTo('profile', { uid: user.uid });
+    } else {
+      navigateTo('profile');
+    }
+  });
+
   // Refresh content on any auth state or bookmark state update
   const unsubBookmarks = subscribe('bookmarks', () => {
     if (detectCurrentPageKey() === 'bookmarks') {
@@ -195,4 +206,4 @@ function init() {
   loadBookmarkedStories();
 }
 
-guardAuth(init, 'bookmarks');
+onPageEnter('bookmarks', init);
