@@ -1,13 +1,16 @@
 /**
  * Daily rewards — gold claim with canvas animation
+ * Refactored with persistent shell – no flicker.
  */
 import { getState, t, showToast } from '../store.js';
 import { db, doc, runTransaction } from '../firebase.js';
 import { getDoc } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
 import { initBugReport } from '../page-common.js';
-import { registerPageCleanup } from '../router.js';
+import { registerPageCleanup, onPageEnter } from '../router.js';
 import { guardAuth } from './shared.js';
 import { playCoinSlash } from '../audio.js';
+import { createPageShell } from '../utils/page-shell.js';
+import { pageEl } from '../utils.js';
 
 let alreadyClaimed = false;
 let streakDays = 0;
@@ -16,24 +19,35 @@ let loading = false;
 let showCoins = false;
 let animFrame = null;
 
-import { pageEl } from '../utils.js';
+// 🔥 Persistent shell & fetch locks
+let _mounted = false;
+let _fetching = false;
+let pageShell = null;
 
 function el(id) { return pageEl(id); }
 
 function render() {
-  el('streak-days') && (el('streak-days').textContent = String(streakDays));
-  el('next-reward') && (el('next-reward').textContent = String(nextReward));
-  const btn = el('claim-btn');
-  if (btn) {
-    btn.disabled = loading || alreadyClaimed;
-    btn.textContent = loading ? t('loading', 'Claiming...') : alreadyClaimed ? '✓ Claimed Today' : '🎁 Claim Free Gold';
-    btn.className = `rewards-claim-btn ${alreadyClaimed ? 'rewards-claim-btn--claimed' : 'rewards-claim-btn--active'}`;
+  // Update static elements that are in the persistent shell
+  const streakDaysEl = el('streak-days');
+  const nextRewardEl = el('next-reward');
+  const claimBtn = el('claim-btn');
+  
+  if (streakDaysEl) streakDaysEl.textContent = String(streakDays);
+  if (nextRewardEl) nextRewardEl.textContent = String(nextReward);
+  
+  if (claimBtn) {
+    claimBtn.disabled = loading || alreadyClaimed;
+    claimBtn.textContent = loading ? t('loading', 'Claiming...') : alreadyClaimed ? '✓ Claimed Today' : '🎁 Claim Free Gold';
+    claimBtn.className = `rewards-claim-btn ${alreadyClaimed ? 'rewards-claim-btn--claimed' : 'rewards-claim-btn--active'}`;
   }
-  el('coin-canvas') && (el('coin-canvas').hidden = !showCoins);
+  
+  const canvas = el('coin-canvas');
+  if (canvas) canvas.hidden = !showCoins;
 
-  // Gamified Card Matrix Rendering
+  // Gamified Card Matrix Rendering - update only the dynamic container
   const matrixGrid = el('rewards-matrix-grid');
   const progressTrack = el('rewards-progress-track');
+  
   if (matrixGrid) {
     let weekStart = Math.floor((streakDays - (alreadyClaimed ? 1 : 0)) / 7) * 7;
     if (weekStart < 0) weekStart = 0;
@@ -41,7 +55,7 @@ function render() {
     let gridHtml = '';
     for (let i = 1; i <= 7; i++) {
       const dayNum = weekStart + i;
-      let status = 'locked'; // 'claimed', 'claimable', 'locked'
+      let status = 'locked';
       
       if (alreadyClaimed) {
         if (dayNum <= streakDays) {
@@ -90,8 +104,11 @@ function render() {
 }
 
 async function checkClaimStatus() {
+  if (_fetching) return;
+  _fetching = true;
+  
   const { user } = getState();
-  if (!user) return;
+  if (!user) { _fetching = false; return; }
   try {
     const claimSnap = await getDoc(doc(db, 'dailyClaims', user.uid));
     if (claimSnap.exists()) {
@@ -107,6 +124,7 @@ async function checkClaimStatus() {
     }
     render();
   } catch (err) { console.warn(err); }
+  _fetching = false;
 }
 
 function startCoinAnimation() {
@@ -218,18 +236,78 @@ async function handleClaim() {
 }
 
 function init() {
+  if (_mounted) return;
+  _mounted = true;
+
+  // Build persistent shell
+  if (!pageShell) {
+    pageShell = createPageShell('daily-rewards-root', `
+      <button class="page-back" id="back-btn" type="button">← Back</button>
+      
+      <div class="rewards-hero animate-page-enter">
+        <canvas id="coin-canvas" class="rewards-canvas" hidden></canvas>
+        <div style="z-index: 10;">
+          <span class="rewards-hero__icon" aria-hidden="true">🎁</span>
+          <h1>Daily Rewards</h1>
+          <p>Claim your free daily Harbor Gold to support creators and unlock special roles.</p>
+          
+          <div class="rewards-streak-box">
+            <div class="rewards-streak-label">Current Streak</div>
+            <div class="rewards-streak-value"><span id="streak-days">0</span> Days</div>
+            <div style="font-size: 0.625rem; opacity: 0.8;">Next reward: +<span id="next-reward">15</span> Gold</div>
+          </div>
+        </div>
+        
+        <button id="claim-btn" class="rewards-claim-btn rewards-claim-btn--active">🎁 Claim Free Gold</button>
+      </div>
+
+      <!-- Gamified 7-Day Card Matrix Container -->
+      <div class="rewards-matrix-container animate-page-enter" style="margin-top: 1.5rem;">
+        <h2 style="font-size: var(--text-md); font-weight: 800; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; color: var(--text-primary);">
+          <span>📅</span> 7-Day Check-in Streak Track
+        </h2>
+        <div class="rewards-progress-track-wrapper">
+          <div class="rewards-progress-track" id="rewards-progress-track"></div>
+        </div>
+        <div class="rewards-matrix-grid" id="rewards-matrix-grid">
+          <!-- Rendered dynamically by render() -->
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 1.5rem; padding: 1.25rem;">
+        <h2 style="font-size: var(--text-md); font-weight: 700; margin: 0 0 0.5rem;">📜 Rewards Rules</h2>
+        <ul class="rewards-policy" style="margin: 0; padding-left: 1.25rem;">
+          <li>Claim free gold once per day (resets at midnight local time).</li>
+          <li>Your streak increases each day you claim consecutively.</li>
+          <li>As your streak grows, your daily reward amount increases up to a maximum of 50 Gold!</li>
+          <li>Missing a day resets your streak back to zero.</li>
+        </ul>
+      </div>
+    `);
+  }
+
   initBugReport();
+  
   const btn = el('claim-btn');
   if (btn) {
     btn.addEventListener('click', handleClaim);
   }
+  
+  const backBtn = el('back-btn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      import('../store.js').then(({ navigateTo }) => navigateTo('feed'));
+    });
+  }
+  
   checkClaimStatus();
 
   registerPageCleanup(() => {
     if (animFrame) {
       cancelAnimationFrame(animFrame);
+      animFrame = null;
     }
   });
 }
 
-guardAuth(init, 'daily-rewards');
+onPageEnter('daily-rewards', init);
