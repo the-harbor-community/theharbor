@@ -1,5 +1,6 @@
 /**
  * Story page — full view with comments, translate, reactions
+ * Refactored with persistent shell – no flicker.
  */
 import { subscribe, getState, t, showToast, showConfirm, navigateTo, getQueryParam } from '../store.js';
 import { db, resolveAuthorId, increment, recordStoryView } from '../firebase.js';
@@ -11,9 +12,10 @@ import { translateText } from '../translate.js';
 import { moderateContent, triggerFloatingEmoji, REACTION_EMOJIS, formatTimeAgo, checkVulgarWords, logFlaggedAttempt, highlightVulgarWords, setupRealtimeInputHighlighting } from '../utils.js';
 import { initBugReport } from '../page-common.js';
 import { guardAuth } from './shared.js';
-import { detectCurrentPageKey, registerPageCleanup } from '../router.js';
+import { detectCurrentPageKey, registerPageCleanup, registerPageSubscription, onPageEnter } from '../router.js';
 import { applyLovePointsInTransaction, isLoveReaction } from '../love-points.js';
 import { playLoveDrop, playToneForEvent } from '../audio.js';
+import { createPageShell } from '../utils/page-shell.js';
 
 const REACTION_EMOJIS_LIST = REACTION_EMOJIS;
 let story = null;
@@ -28,17 +30,24 @@ let activeReplyParentId = null;
 let highlightedCommentId = null;
 let currentStoryId = null;
 
+// 🔥 Persistent shell & fetch locks
+let _mounted = false;
+let _fetching = false;
+let pageShell = null;
+
 function el(id) { return document.getElementById(id); }
 
 function renderLoading() {
-  const root = el('story-root');
-  if (root) root.innerHTML = '<div class="page-skeleton"></div><div class="page-skeleton"></div>';
+  const container = el('story-dynamic-content');
+  if (container) {
+    container.innerHTML = '<div class="page-skeleton"></div><div class="page-skeleton"></div>';
+  }
 }
 
 function renderError(msg) {
-  const root = el('story-root');
-  if (root) {
-    root.innerHTML = `
+  const container = el('story-dynamic-content');
+  if (container) {
+    container.innerHTML = `
       <div class="page-error">⚠️ ${msg}
         <button class="btn btn--primary" style="margin-top:1rem" id="back-feed">${t('back_home', '← Back to Home')}</button>
       </div>`;
@@ -134,10 +143,8 @@ function renderComments(isOwner) {
         </div>
       </div>` : '';
 
-    // 🔥 Delete button for comments: visible to comment author OR story owner
     const showDelete = user && (comment.userId === user.uid || isOwner);
 
-    // 🔥 Pin button for comments: visible to story owner
     const pinBtn = isOwner ? `
       <button type="button" class="story-btn story-btn--primary" style="font-size:0.625rem;padding:0.125rem 0.5rem" data-pin="${comment.id}" data-pinned="${comment.isPinned ? 'true' : 'false'}">
         📌 ${comment.isPinned ? t('unpin', 'Unpin') : t('pin', 'Pin')}
@@ -172,7 +179,14 @@ function escapeText(str) {
 }
 
 function renderStory() {
-  if (!story || !el('story-root')) return;
+  const container = el('story-dynamic-content');
+  if (!container) return;
+
+  if (!story) {
+    renderLoading();
+    return;
+  }
+
   const { user, userData } = getState();
   const isOwner = user && resolveAuthorId(story) === user.uid;
   const canEdit = isOwner;
@@ -185,8 +199,7 @@ function renderStory() {
     return `<button type="button" class="story-reaction${loveCls}${active}" data-emoji="${emoji}">${emoji} ${count}</button>`;
   }).join('');
 
-  el('story-root').innerHTML = `
-    <button type="button" class="page-back" id="back-btn">${t('back_to_feed', '← Back to feed')}</button>
+  container.innerHTML = `
     <article class="card story-article animate-page-enter">
       <div class="story-meta">
         <div class="story-author">
@@ -254,10 +267,11 @@ function renderStory() {
           <span class="char-count" id="comment-count">0/1000</span>
         </div>
         <button type="submit" class="btn btn--primary" style="width:100%">🚀 ${t('post_comment', 'Post Comment')}</button>
-      </form>`) : `
+      </form>
+    `) : `
       <div class="card page-empty" style="padding:1rem">🔒 ${t('sign_in_to_comment', 'Please sign in to participate in the conversation.')}</div>`}
     <section style="margin-top:var(--space-lg)">
-      <h3 style="font-size:var(--text-sm);font-weight:700;border-bottom:1px solid var(--color-border);padding-bottom:0.5rem;margin-bottom:var(--space-md)">🗣️ ${t('discussion', 'Discussion')} (${comments.length})</h3>
+      <h3 style="font-size:var(--text-sm);font-weight:700;border-bottom:1px solid var(--color-border);padding-bottom:0.5rem;margin-bottom:var(--space-md)">🗣️ ${t('discussion', 'Discussion')} (<span id="comments-count-badge">${comments.length}</span>)</h3>
       <div id="comments-list">${renderComments(isOwner)}</div>
     </section>`;
 
@@ -603,8 +617,72 @@ async function generateAiReflection() {
   btn.remove();
 }
 
+function renderCommentsOnly() {
+  const listEl = el('comments-list');
+  if (listEl && story) {
+    const { user } = getState();
+    const isOwner = user && resolveAuthorId(story) === user.uid;
+    listEl.innerHTML = renderComments(isOwner);
+    const badge = el('comments-count-badge');
+    if (badge) badge.textContent = comments.length;
+    wireCommentEvents(isOwner);
+  } else {
+    renderStory();
+  }
+}
+
+function wireCommentEvents(isOwner) {
+  document.querySelectorAll('.comment-react').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.preventDefault(); handleCommentReaction(btn.dataset.comment, btn.dataset.emoji, e); });
+  });
+
+  document.querySelectorAll('.comment-gold-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.preventDefault(); window.openGoldModal(btn.dataset.goldStory || story.id, true); });
+  });
+
+  wireProfileAvatars();
+
+  document.querySelectorAll('.reply-text').forEach(input => {
+    setupRealtimeInputHighlighting(input);
+  });
+
+  document.querySelectorAll('[data-reply]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      activeReplyParentId = activeReplyParentId === btn.dataset.reply ? null : btn.dataset.reply;
+      renderCommentsOnly();
+    });
+  });
+  document.querySelectorAll('.cancel-reply').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.preventDefault(); activeReplyParentId = null; renderCommentsOnly(); });
+  });
+  document.querySelectorAll('.submit-reply').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.preventDefault(); handleAddReply(btn.dataset.parent); });
+  });
+
+  document.querySelectorAll('[data-pin]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.preventDefault(); handleTogglePin(btn.dataset.pin, btn.dataset.pinned === 'true'); });
+  });
+  document.querySelectorAll('[data-report-comment]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.preventDefault(); handleReport(btn.dataset.reportComment, 'comment'); });
+  });
+
+  document.querySelectorAll('[data-delete-comment]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.preventDefault(); handleDeleteComment(btn.dataset.deleteComment); });
+  });
+  document.querySelectorAll('[data-delete-reply]').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.preventDefault(); handleDeleteComment(btn.dataset.deleteReply); });
+  });
+}
+
 function wireEvents(isOwner) {
-  el('back-btn')?.addEventListener('click', handleBackToFeed);
+  // Back button is now in the persistent shell, attach listener safely
+  const backBtn = document.getElementById('back-btn');
+  if (backBtn) {
+    backBtn.removeEventListener('click', handleBackToFeed);
+    backBtn.addEventListener('click', handleBackToFeed);
+  }
+  
   el('btn-ai-reflect')?.addEventListener('click', (e) => {
     e.preventDefault();
     generateAiReflection();
@@ -620,21 +698,8 @@ function wireEvents(isOwner) {
     btn.addEventListener('click', (e) => { e.preventDefault(); handleReaction(btn.dataset.emoji, e); });
   });
 
-  document.querySelectorAll('.comment-react').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.preventDefault(); handleCommentReaction(btn.dataset.comment, btn.dataset.emoji, e); });
-  });
-
-  document.querySelectorAll('.comment-gold-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.preventDefault(); window.openGoldModal(btn.dataset.goldStory || story.id, true); });
-  });
-
-  wireProfileAvatars();
-
   const commentInput = el('new-comment');
   if (commentInput) setupRealtimeInputHighlighting(commentInput);
-  document.querySelectorAll('.reply-text').forEach(input => {
-    setupRealtimeInputHighlighting(input);
-  });
 
   el('comment-form')?.addEventListener('submit', handleAddComment);
   el('new-comment')?.addEventListener('input', (e) => {
@@ -644,34 +709,7 @@ function wireEvents(isOwner) {
     if (warnEl) warnEl.hidden = true;
   });
 
-  document.querySelectorAll('[data-reply]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      activeReplyParentId = activeReplyParentId === btn.dataset.reply ? null : btn.dataset.reply;
-      renderStory();
-    });
-  });
-  document.querySelectorAll('.cancel-reply').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.preventDefault(); activeReplyParentId = null; renderStory(); });
-  });
-  document.querySelectorAll('.submit-reply').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.preventDefault(); handleAddReply(btn.dataset.parent); });
-  });
-
-  document.querySelectorAll('[data-pin]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.preventDefault(); handleTogglePin(btn.dataset.pin, btn.dataset.pinned === 'true'); });
-  });
-  document.querySelectorAll('[data-report-comment]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.preventDefault(); handleReport(btn.dataset.reportComment, 'comment'); });
-  });
-
-  // 🔥 Delete comment and delete reply listeners
-  document.querySelectorAll('[data-delete-comment]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.preventDefault(); handleDeleteComment(btn.dataset.deleteComment); });
-  });
-  document.querySelectorAll('[data-delete-reply]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.preventDefault(); handleDeleteComment(btn.dataset.deleteReply); });
-  });
+  wireCommentEvents(isOwner);
 }
 
 async function reloadComments() {
@@ -694,15 +732,19 @@ async function reloadComments() {
     commentRxSnap.forEach(d => { userCommentReactions[d.id] = d.data().emojis || []; });
   }
   activeReplyParentId = null;
-  renderStory();
+  renderCommentsOnly();
 }
 
 async function loadStory() {
+  if (_fetching) return;
+  _fetching = true;
+
   const storyId = getQueryParam('id');
   if (!storyId) {
     console.warn('⚠️ No story selected. Triggering fallback redirection...');
     showToast('⚠️ No story selected. Returning to feed.', 'warning');
     navigateTo('feed');
+    _fetching = false;
     return;
   }
   console.log('✅ Loading story ID:', storyId);
@@ -711,20 +753,15 @@ async function loadStory() {
 
   const { user, userData } = getState();
   
-  let isBackground = false;
-  if (story && story.id === storyId) {
-    isBackground = true;
-    renderStory();
-    handleHashScroll();
-  } else {
-    renderLoading();
-  }
+  renderLoading();
+
   try {
     const docSnap = await getDoc(doc(db, 'stories', storyId));
-    if (!docSnap.exists()) { renderError(t('story_not_found', 'Story not found.')); return; }
+    if (!docSnap.exists()) { renderError(t('story_not_found', 'Story not found.')); _fetching = false; return; }
     const data = docSnap.data();
     if (!data.approved && !userData?.isAdmin && data.userId !== user?.uid) {
       renderError(t('story_pending', 'This story is pending approval or has been flagged.'));
+      _fetching = false;
       return;
     }
     story = { id: docSnap.id, ...data };
@@ -762,6 +799,8 @@ async function loadStory() {
     handleHashScroll();
   } catch (err) {
     renderError(err.message || t('story_load_error', 'An error occurred loading the story.'));
+  } finally {
+    _fetching = false;
   }
 }
 
@@ -841,6 +880,24 @@ function handleDeleteStory() {
   });
 }
 
+function updateStoryReactionsDOM() {
+  const storyRxContainer = document.querySelector('.story-reactions');
+  if (storyRxContainer) {
+    const reactionsHtml = REACTION_EMOJIS_LIST.map(emoji => {
+      const count = story.reactions?.[emoji] || 0;
+      const active = userReactions.includes(emoji) ? ' active' : '';
+      const loveCls = (emoji === '❤️' || emoji === '🥰' || emoji === '💕') ? ' reaction-love' : '';
+      return `<button type="button" class="story-reaction${loveCls}${active}" data-emoji="${emoji}">${emoji} ${count}</button>`;
+    }).join('');
+    storyRxContainer.innerHTML = reactionsHtml;
+    storyRxContainer.querySelectorAll('.story-reaction').forEach(btn => {
+      btn.addEventListener('click', (e) => { e.preventDefault(); handleReaction(btn.dataset.emoji, e); });
+    });
+  } else {
+    renderStory();
+  }
+}
+
 async function handleReaction(emoji, e) {
   const { user, userData } = getState();
   if (!user?.emailVerified) { showToast(t('verify_email_first', '📧 Please verify your email first.'), 'warning'); return; }
@@ -854,7 +911,7 @@ async function handleReaction(emoji, e) {
   const reactions = { ...story.reactions };
   reactions[emoji] = Math.max((reactions[emoji] || 0) + (hasReacted ? -1 : 1), 0);
   story = { ...story, reactions };
-  renderStory();
+  updateStoryReactionsDOM();
   try {
     await runTransaction(db, async (tx) => {
       const storyRef = doc(db, 'stories', story.id);
@@ -888,7 +945,7 @@ async function handleReaction(emoji, e) {
     console.warn('Reaction failed:', err);
     userReactions = prevUserRx;
     story = prevStory;
-    renderStory();
+    updateStoryReactionsDOM();
     showToast(t('reaction_failed', '❌ Reaction could not be saved.'), 'error');
   }
 }
@@ -909,7 +966,25 @@ async function handleCommentReaction(commentId, emoji, e) {
     commentReactions[commentId] = reactions;
     return { ...c, reactions };
   });
-  renderStory();
+  
+  const commentEl = document.getElementById(`comment-${commentId}`);
+  if (commentEl) {
+    const rxContainer = commentEl.querySelector('.comment-reactions');
+    if (rxContainer) {
+      const c = comments.find(x => x.id === commentId);
+      if (c) {
+        rxContainer.innerHTML = renderCommentReactions(commentId, c.reactions, true, resolveAuthorId(c) || c.userId);
+        rxContainer.querySelectorAll('.comment-react').forEach(btn => {
+          btn.addEventListener('click', (e) => { e.preventDefault(); handleCommentReaction(commentId, btn.dataset.emoji, e); });
+        });
+        rxContainer.querySelectorAll('.comment-gold-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => { e.preventDefault(); window.openGoldModal(btn.dataset.goldStory || story.id, true); });
+        });
+      }
+    }
+  } else {
+    renderStory();
+  }
   try {
     await runTransaction(db, async (tx) => {
       const commentRef = doc(db, 'comments', commentId);
@@ -1002,7 +1077,6 @@ async function handleAddComment(e) {
   }
 }
 
-// 🔥 Reply respects anonymous checkbox
 async function handleAddReply(parentId) {
   const { user, userData } = getState();
   const text = document.querySelector('.reply-text')?.value.trim();
@@ -1050,7 +1124,6 @@ async function handleAddReply(parentId) {
   }
 }
 
-// 🔥 Delete a comment and all its replies
 async function handleDeleteComment(commentId) {
   const { user } = getState();
   if (!user) return;
@@ -1058,7 +1131,6 @@ async function handleDeleteComment(commentId) {
   const comment = comments.find(c => c.id === commentId);
   if (!comment) return;
 
-  // Check permission: user must be comment author OR story owner
   const isOwner = user && resolveAuthorId(story) === user.uid;
   const commentAuthorId = resolveAuthorId(comment) || comment.userId;
   if (commentAuthorId !== user.uid && !isOwner) {
@@ -1072,7 +1144,6 @@ async function handleDeleteComment(commentId) {
     false,
     async () => {
       try {
-        // Find all replies to this comment
         const replyIds = comments.filter(c => c.parentId === commentId).map(c => c.id);
         const allIds = [commentId, ...replyIds];
 
@@ -1080,7 +1151,6 @@ async function handleDeleteComment(commentId) {
         allIds.forEach(id => {
           batch.delete(doc(db, 'comments', id));
         });
-        // Update story comment count
         batch.update(doc(db, 'stories', story.id), {
           commentCount: increment(-allIds.length),
         });
@@ -1173,7 +1243,19 @@ function handleReport(targetId, type) {
 }
 
 function init() {
+  if (_mounted) return;
+  _mounted = true;
+
+  // Build persistent shell
+  if (!pageShell) {
+    pageShell = createPageShell('story-root', `
+      <button type="button" class="page-back" id="back-btn">${t('back_to_feed', '← Back to feed')}</button>
+      <div id="story-dynamic-content" class="page-content"></div>
+    `);
+  }
+
   initBugReport();
+
   const handleScrollEvent = (e) => {
     if (e.detail?.hash) handleHashScroll(e.detail.hash);
   };
@@ -1197,13 +1279,43 @@ function init() {
         totalGold: (story.totalGold || 0) + e.detail.amount,
         goldReceived: (story.goldReceived || 0) + e.detail.amount,
       };
-      renderStory();
+      const goldBadge = document.querySelector('.story-gold-badge');
+      const gold = story.totalGold || story.goldReceived || 0;
+      if (goldBadge) {
+        goldBadge.textContent = `🪙 ${gold}`;
+      } else {
+        const badgesContainer = document.querySelector('.story-badges');
+        if (badgesContainer) {
+          const badge = document.createElement('span');
+          badge.className = 'story-gold-badge';
+          badge.textContent = `🪙 ${gold}`;
+          badgesContainer.appendChild(badge);
+        } else {
+          renderStory();
+        }
+      }
     }
   };
   window.addEventListener('gold-donated', onGoldDonated);
   registerPageCleanup(() => window.removeEventListener('gold-donated', onGoldDonated));
 
-  loadStory();
+  // 🔥 Set up subscription to re-load story when navigating back to it
+  const unsub = subscribe('userData', () => {
+    if (detectCurrentPageKey() === 'story' && currentStoryId) {
+      // Only reload if story data might have changed (e.g., gold, reactions)
+      // We use a debounce to avoid multiple loads
+      if (!_fetching) {
+        // Check if the current story is still the same; if not, load new one
+        const urlStoryId = getQueryParam('id');
+        if (urlStoryId && urlStoryId !== currentStoryId) {
+          loadStory();
+        }
+      }
+    }
+  });
+  registerPageSubscription(unsub);
+
+  return loadStory();
 }
 
-guardAuth(init, 'story');
+onPageEnter('story', init);
