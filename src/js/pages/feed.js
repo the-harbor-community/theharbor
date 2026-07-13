@@ -1,5 +1,6 @@
 /**
  * Feed page — story listing, categories, reactions
+ * Refactored with persistent shell – no flicker.
  */
 import { subscribe, getState, t, showToast, navigateTo, getFeedScroll, setFeedCategory, getFeedCategory, captureFeedState, shouldRestoreFeed, markFeedRestored } from '../store.js';
 import { bindCategoryPopovers } from '../utils/category-popover.js';
@@ -11,6 +12,7 @@ import { triggerFloatingEmoji, debounce, passesGenderFilter, REACTION_EMOJIS, pa
 import { initBugReport } from '../page-common.js';
 import { applyLovePointsInTransaction, isLoveReaction } from '../love-points.js';
 import { onPageEnter, detectCurrentPageKey, registerPageSubscription, registerPageCleanup } from '../router.js';
+import { createPageShell } from '../utils/page-shell.js';
 
 let stories = [];
 let lastDoc = null;
@@ -21,6 +23,11 @@ let userReactions = {};
 let searchTerm = '';
 let scrollRestored = false;
 let cachedSearchStories = null;
+
+// 🔥 Persistent shell & fetch locks
+let _mounted = false;
+let _fetching = false;
+let pageShell = null;
 
 function updateScrollProgress() {
   const container = document.getElementById('scroll-progress-container');
@@ -252,16 +259,34 @@ function renderStories(isAppending = false) {
   }
 
   const listBuffer = document.createElement('div');
+  const existingContainerCards = Array.from(container.querySelectorAll('app-story-card'));
+  const recycledMap = new Map();
+  existingContainerCards.forEach(card => {
+    const id = card.getAttribute('story-id');
+    if (id) recycledMap.set(id, card);
+  });
+
   if (isAppending) {
     listBuffer.append(...container.childNodes);
   }
 
-  const existingCards = Array.from(listBuffer.querySelectorAll('app-story-card'));
-  const existingIds = new Set(existingCards.map(c => c.getAttribute('story-id')));
-
   filtered.forEach((story, index) => {
-    if (existingIds.has(story.id)) {
-      updateStoryCard(story.id, listBuffer);
+    const existingCard = recycledMap.get(story.id);
+    if (existingCard) {
+      existingCard.setAttribute('gold', String(story.totalGold || story.goldReceived || 0));
+      existingCard.setAttribute('comments', String(story.commentCount || 0));
+      existingCard.setAttribute('views', String(story.views || 0));
+      
+      const { bookmarks } = getState();
+      if (bookmarks?.includes(story.id)) {
+        existingCard.setAttribute('bookmarked', '');
+      } else {
+        existingCard.removeAttribute('bookmarked');
+      }
+      
+      existingCard.setReactions(story.reactions, userReactions[story.id], handleReaction);
+      existingCard.showGoldButton(user && resolveAuthorId(story) !== user.uid);
+      listBuffer.appendChild(existingCard);
       return;
     }
 
@@ -283,7 +308,6 @@ function renderStories(isAppending = false) {
     const { bookmarks } = getState();
     if (bookmarks?.includes(story.id)) card.setAttribute('bookmarked', '');
     
-    // Smooth cascading stagger effect (max 0.4s delay)
     card.style.animationDelay = `${Math.min(index * 0.05, 0.4)}s`;
 
     listBuffer.appendChild(card);
@@ -301,9 +325,13 @@ function renderStories(isAppending = false) {
 }
 
 async function fetchStories(loadMore = false) {
+  if (_fetching) return;
+  _fetching = true;
+
   const { user, userData } = getState();
-  if (!user || loading) return;
-  if (loadMore && !hasMore) return;
+  if (!user) { _fetching = false; return; }
+  if (loadMore && !hasMore) { _fetching = false; return; }
+  
   loading = true;
   
   const container = pageEl('stories-container');
@@ -403,7 +431,8 @@ async function fetchStories(loadMore = false) {
     console.error('Feed load error:', err);
   }
   loading = false;
-  renderStories();
+  renderStories(loadMore);
+  _fetching = false;
 }
 
 async function loadUserReactions() {
@@ -503,9 +532,37 @@ function onGoldDonated(e) {
   }
 }
 
+// 🔥 New init function using persistent shell
 function init() {
-  activeCategory = getFeedCategory();
-  scrollRestored = false;
+  if (_mounted) return;
+  _mounted = true;
+
+  // Build persistent shell
+  if (!pageShell) {
+    pageShell = createPageShell('stories-root', `
+      <section class="feed-hero animate-page-enter">
+        <h1 id="hero-heading">⚓ Welcome to The Harbor</h1>
+        <p id="hero-tagline">A safe place to share, heal, and grow — together.</p>
+      </section>
+      <div class="feed-search-container" style="display: flex; gap: 0.75rem; width: 100%; box-sizing: border-box; margin-bottom: 1.5rem; position: relative; max-width: 32rem; margin-inline: auto; padding: 0 var(--space-md); flex-wrap: nowrap;">
+        <div style="flex: 1; position: relative; min-width: 0;">
+          <label for="search-stories" class="sr-only">Stories</label>
+          <input type="search" id="search-stories" class="input feed-search__input" placeholder="Stories" autocomplete="off" style="width: 100%; border-radius: var(--radius-lg); box-sizing: border-box; padding-left: 2.75rem; font-size: 0.8125rem; color: var(--text-primary); background-image: url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2216%22 height=%2216%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23a0aec0%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><circle cx=%2211%22 cy=%2211%22 r=%228%22></circle><line x1=%2221%22 y1=%2221%22 x2=%2216.65%22 y2=%2216.65%22></line></svg>'); background-repeat: no-repeat; background-position: 0.875rem center; background-size: 1rem;">
+          <div id="stories-search-dropdown" class="search-results-dropdown" style="display: none; position: absolute; left: 0; right: 0; top: 100%; background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: 1000; max-height: 300px; overflow-y: auto; margin-top: 0.25rem;"></div>
+        </div>
+        <div style="flex: 1; position: relative; min-width: 0;">
+          <label for="search-members" class="sr-only">Members</label>
+          <input type="search" id="search-members" class="input feed-search__input" placeholder="Members" autocomplete="off" style="width: 100%; border-radius: var(--radius-lg); box-sizing: border-box; padding-left: 2.75rem; font-size: 0.8125rem; color: var(--text-primary); background-image: url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2216%22 height=%2216%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23a0aec0%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><circle cx=%2211%22 cy=%2211%22 r=%228%22></circle><line x1=%2221%22 y1=%2221%22 x2=%2216.65%22 y2=%2216.65%22></line></svg>'); background-repeat: no-repeat; background-position: 0.875rem center; background-size: 1rem;">
+          <div id="members-search-dropdown" class="search-results-dropdown" style="display: none; position: absolute; left: 0; right: 0; top: 100%; background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: 1000; max-height: 300px; overflow-y: auto; margin-top: 0.25rem;"></div>
+        </div>
+      </div>
+      <nav class="feed-tabs" id="feed-tabs" role="tablist" aria-label="Story categories"></nav>
+      <div id="stories-container" class="feed-stories" aria-live="polite"></div>
+      <div id="load-more-wrap" class="feed-load-more" hidden>
+        <button id="load-more-btn" class="btn btn--secondary">📥 Load More</button>
+      </div>
+    `);
+  }
 
   // Show the scroll progress container and reset bar width
   const container = document.getElementById('scroll-progress-container');
@@ -536,236 +593,242 @@ function init() {
   setPageText('hero-heading', `⚓ ${t('feed_hero_heading', 'Welcome to The Harbor')}`);
   setPageText('hero-tagline', t('feed_hero_tagline', 'A safe place to share, heal, and grow — together.'));
     
-    // Setup dual search handlers
-    const searchStoriesInput = pageEl('search-stories');
-    const searchMembersInput = pageEl('search-members');
-    const storiesDropdown = pageEl('stories-search-dropdown');
-    const membersDropdown = pageEl('members-search-dropdown');
+  // Setup dual search handlers
+  const searchStoriesInput = pageEl('search-stories');
+  const searchMembersInput = pageEl('search-members');
+  const storiesDropdown = pageEl('stories-search-dropdown');
+  const membersDropdown = pageEl('members-search-dropdown');
 
-    if (searchStoriesInput) searchStoriesInput.placeholder = "Search stories";
-    if (searchMembersInput) searchMembersInput.placeholder = "Search members";
+  if (searchStoriesInput) searchStoriesInput.placeholder = "Search stories";
+  if (searchMembersInput) searchMembersInput.placeholder = "Search members";
 
-    const handleStoriesSearch = debounce(async (queryVal) => {
-      if (!queryVal.trim()) {
-        if (storiesDropdown) {
-          storiesDropdown.style.display = 'none';
-          storiesDropdown.innerHTML = '';
-        }
-        return;
-      }
-      
-      const term = queryVal.toLowerCase();
-      if (!cachedSearchStories) {
-        try {
-          const snap = await getDocs(query(
-            collection(db, 'stories'),
-            where('approved', '==', true),
-            where('visibility', '==', 'public'),
-            orderBy('createdAt', 'desc'),
-            limit(150)
-          ));
-          cachedSearchStories = [];
-          snap.forEach(docSnap => {
-            cachedSearchStories.push({ id: docSnap.id, ...docSnap.data() });
-          });
-        } catch (err) {
-          console.error('Failed to fetch stories for search:', err);
-        }
-      }
-
-      const matches = (cachedSearchStories || []).filter(s => 
-        s.title?.toLowerCase().includes(term) || 
-        s.text?.toLowerCase().includes(term) || 
-        s.authorName?.toLowerCase().includes(term)
-      );
-
+  const handleStoriesSearch = debounce(async (queryVal) => {
+    if (!queryVal.trim()) {
       if (storiesDropdown) {
-        if (matches.length === 0) {
-          storiesDropdown.innerHTML = `<div style="padding: 1rem; text-align: center; font-size: 0.75rem; color: var(--text-muted);">No matching stories found</div>`;
-        } else {
-          const grouped = {};
-          matches.forEach(story => {
-            const cat = story.category || 'struggles';
-            if (!grouped[cat]) grouped[cat] = [];
-            grouped[cat].push(story);
-          });
-
-          let html = '';
-          for (const [cat, catStories] of Object.entries(grouped)) {
-            const catLabel = cat.charAt(0).toUpperCase() + cat.slice(1);
-            html += `
-              <div style="background: var(--bg-secondary); padding: 0.375rem 0.75rem; font-size: 0.6875rem; font-weight: 800; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--color-border); border-top: 1px solid var(--color-border);">${catLabel}</div>
-            `;
-            html += catStories.map(story => `
-              <div class="search-item" style="padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border); cursor: pointer; transition: background 0.15s;" data-story-id="${story.id}">
-                <div style="font-weight: 700; font-size: 0.8125rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${story.title || 'Untitled'}</div>
-                <div style="font-size: 0.7125rem; color: var(--text-muted); margin-top: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${(story.text || '').substring(0, 80)}...</div>
-                <div style="font-size: 0.625rem; color: var(--color-primary); font-weight: 700; margin-top: 0.15rem;">By ${story.authorName || 'Friend'}</div>
-              </div>
-            `).join('');
-          }
-
-          storiesDropdown.innerHTML = html;
-
-          storiesDropdown.querySelectorAll('[data-story-id]').forEach(item => {
-            item.addEventListener('click', (e) => {
-              const storyId = item.dataset.storyId;
-              if (storyId) {
-                storiesDropdown.style.display = 'none';
-                if (searchStoriesInput) searchStoriesInput.value = '';
-                openStoryPreviewModal(storyId);
-              }
-            });
-          });
-        }
-        storiesDropdown.style.display = 'block';
+        storiesDropdown.style.display = 'none';
+        storiesDropdown.innerHTML = '';
       }
-    }, 400);
-
-    let cachedMembers = null;
-    const handleMembersSearch = debounce(async (queryVal) => {
-      if (!queryVal.trim()) {
-        if (membersDropdown) {
-          membersDropdown.style.display = 'none';
-          membersDropdown.innerHTML = '';
-        }
-        return;
+      return;
+    }
+    
+    const term = queryVal.toLowerCase();
+    if (!cachedSearchStories) {
+      try {
+        const snap = await getDocs(query(
+          collection(db, 'stories'),
+          where('approved', '==', true),
+          where('visibility', '==', 'public'),
+          orderBy('createdAt', 'desc'),
+          limit(150)
+        ));
+        cachedSearchStories = [];
+        snap.forEach(docSnap => {
+          cachedSearchStories.push({ id: docSnap.id, ...docSnap.data() });
+        });
+      } catch (err) {
+        console.error('Failed to fetch stories for search:', err);
       }
+    }
 
-      const term = queryVal.toLowerCase();
+    const matches = (cachedSearchStories || []).filter(s => 
+      s.title?.toLowerCase().includes(term) || 
+      s.text?.toLowerCase().includes(term) || 
+      s.authorName?.toLowerCase().includes(term)
+    );
 
-      if (!cachedMembers) {
-        try {
-          const snap = await getDocs(query(collection(db, 'users'), where('isPublic', '==', true)));
-          cachedMembers = [];
-          snap.forEach(docSnap => {
-            cachedMembers.push({ id: docSnap.id, ...docSnap.data() });
-          });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.GET, 'users');
+    if (storiesDropdown) {
+      if (matches.length === 0) {
+        storiesDropdown.innerHTML = `<div style="padding: 1rem; text-align: center; font-size: 0.75rem; color: var(--text-muted);">No matching stories found</div>`;
+      } else {
+        const grouped = {};
+        matches.forEach(story => {
+          const cat = story.category || 'struggles';
+          if (!grouped[cat]) grouped[cat] = [];
+          grouped[cat].push(story);
+        });
+
+        let html = '';
+        for (const [cat, catStories] of Object.entries(grouped)) {
+          const catLabel = cat.charAt(0).toUpperCase() + cat.slice(1);
+          html += `
+            <div style="background: var(--bg-secondary); padding: 0.375rem 0.75rem; font-size: 0.6875rem; font-weight: 800; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--color-border); border-top: 1px solid var(--color-border);">${catLabel}</div>
+          `;
+          html += catStories.map(story => `
+            <div class="search-item" style="padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border); cursor: pointer; transition: background 0.15s;" data-story-id="${story.id}">
+              <div style="font-weight: 700; font-size: 0.8125rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${story.title || 'Untitled'}</div>
+              <div style="font-size: 0.7125rem; color: var(--text-muted); margin-top: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${(story.text || '').substring(0, 80)}...</div>
+              <div style="font-size: 0.625rem; color: var(--color-primary); font-weight: 700; margin-top: 0.15rem;">By ${story.authorName || 'Friend'}</div>
+            </div>
+          `).join('');
         }
-      }
 
-      const matches = (cachedMembers || []).filter(u => 
-        u.name?.toLowerCase().includes(term) || 
-        u.bio?.toLowerCase().includes(term)
-      );
+        storiesDropdown.innerHTML = html;
 
-      if (membersDropdown) {
-        if (matches.length === 0) {
-          membersDropdown.innerHTML = `<div style="padding: 1rem; text-align: center; font-size: 0.75rem; color: var(--text-muted);">No matching members found</div>`;
-        } else {
-          const grouped = { admins: [], members: [] };
-          matches.forEach(u => {
-            if (u.isAdmin) {
-              grouped.admins.push(u);
-            } else {
-              grouped.members.push(u);
+        storiesDropdown.querySelectorAll('[data-story-id]').forEach(item => {
+          item.addEventListener('click', (e) => {
+            const storyId = item.dataset.storyId;
+            if (storyId) {
+              storiesDropdown.style.display = 'none';
+              if (searchStoriesInput) searchStoriesInput.value = '';
+              openStoryPreviewModal(storyId);
             }
           });
-
-          let html = '';
-          if (grouped.admins.length > 0) {
-            html += `<div style="background: var(--bg-secondary); padding: 0.375rem 0.75rem; font-size: 0.6875rem; font-weight: 800; color: var(--color-danger); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--color-border); border-top: 1px solid var(--color-border);">⚓ Harbor Support Team</div>`;
-            html += grouped.admins.map(u => `
-              <div class="search-item" style="padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border); cursor: pointer; transition: background 0.15s; display: flex; align-items: center; gap: 0.5rem;" data-user-uid="${u.id}">
-                <span style="font-size: 1.25rem;">${u.avatar || '👤'}</span>
-                <div style="flex: 1; min-width: 0;">
-                  <div style="font-weight: 700; font-size: 0.8125rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.name || 'Friend'}</div>
-                  <div style="font-size: 0.6875rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.bio || ''}</div>
-                </div>
-              </div>
-            `).join('');
-          }
-          if (grouped.members.length > 0) {
-            html += `<div style="background: var(--bg-secondary); padding: 0.375rem 0.75rem; font-size: 0.6875rem; font-weight: 800; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--color-border); border-top: 1px solid var(--color-border);">🌊 Community Members</div>`;
-            html += grouped.members.map(u => `
-              <div class="search-item" style="padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border); cursor: pointer; transition: background 0.15s; display: flex; align-items: center; gap: 0.5rem;" data-user-uid="${u.id}">
-                <span style="font-size: 1.25rem;">${u.avatar || '👤'}</span>
-                <div style="flex: 1; min-width: 0;">
-                  <div style="font-weight: 700; font-size: 0.8125rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.name || 'Friend'}</div>
-                  <div style="font-size: 0.6875rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.bio || ''}</div>
-                </div>
-              </div>
-            `).join('');
-          }
-
-          membersDropdown.innerHTML = html;
-
-          membersDropdown.querySelectorAll('[data-user-uid]').forEach(item => {
-            item.addEventListener('click', () => {
-              const uid = item.dataset.userUid;
-              if (uid) {
-                membersDropdown.style.display = 'none';
-                if (searchMembersInput) searchMembersInput.value = '';
-                navigateTo(`profile`, { uid });
-              }
-            });
-          });
-        }
-        membersDropdown.style.display = 'block';
+        });
       }
-    }, 400);
+      storiesDropdown.style.display = 'block';
+    }
+  }, 400);
 
-    searchStoriesInput?.addEventListener('input', (e) => handleStoriesSearch(e.target.value));
-    searchMembersInput?.addEventListener('input', (e) => handleMembersSearch(e.target.value));
-
-    const onDocClick = (e) => {
-      if (storiesDropdown && !searchStoriesInput?.contains(e.target) && !storiesDropdown.contains(e.target)) {
-        storiesDropdown.style.display = 'none';
-      }
-      if (membersDropdown && !searchMembersInput?.contains(e.target) && !membersDropdown.contains(e.target)) {
+  let cachedMembers = null;
+  const handleMembersSearch = debounce(async (queryVal) => {
+    if (!queryVal.trim()) {
+      if (membersDropdown) {
         membersDropdown.style.display = 'none';
+        membersDropdown.innerHTML = '';
       }
-    };
-    document.addEventListener('click', onDocClick);
-    registerPageCleanup(() => document.removeEventListener('click', onDocClick));
+      return;
+    }
 
-    pageEl('load-more-btn')?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); fetchStories(true); });
-    initBugReport();
+    const term = queryVal.toLowerCase();
 
-    registerPageSubscription(subscribe('authLoading', () => {
-      if (detectCurrentPageKey() !== 'feed') return;
-      const { authLoading, user, userData } = getState();
-      if (!authLoading && !user) navigateTo('welcome');
-      if (!authLoading && user) {
-        if (userData?.gender === '🧔 Man' && activeCategory === 'all' && !sessionStorage.getItem('feed_active_category')) {
-          activeCategory = 'men';
-          setFeedCategory('men');
-        }
-        if (userData?.gender === '👩 Woman' && activeCategory === 'all' && !sessionStorage.getItem('feed_active_category')) {
-          activeCategory = 'women';
-          setFeedCategory('women');
-        }
-        renderTabs();
-        loadUserReactions().then(() => fetchStories());
+    if (!cachedMembers) {
+      try {
+        const snap = await getDocs(query(collection(db, 'users'), where('isPublic', '==', true)));
+        cachedMembers = [];
+        snap.forEach(docSnap => {
+          cachedMembers.push({ id: docSnap.id, ...docSnap.data() });
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, 'users');
       }
-    }));
+    }
 
-    registerPageSubscription(subscribe('userData', () => { if (detectCurrentPageKey() === 'feed') renderTabs(); }));
-    registerPageSubscription(subscribe('bookmarks', () => {
-      if (detectCurrentPageKey() !== 'feed') return;
-      const { bookmarks } = getState();
-      const cards = document.querySelectorAll('app-story-card');
-      cards.forEach(card => {
-        const id = card.getAttribute('story-id');
-        if (id) {
-          if (bookmarks?.includes(id)) {
-            card.setAttribute('bookmarked', '');
+    const matches = (cachedMembers || []).filter(u => 
+      u.name?.toLowerCase().includes(term) || 
+      u.bio?.toLowerCase().includes(term)
+    );
+
+    if (membersDropdown) {
+      if (matches.length === 0) {
+        membersDropdown.innerHTML = `<div style="padding: 1rem; text-align: center; font-size: 0.75rem; color: var(--text-muted);">No matching members found</div>`;
+      } else {
+        const grouped = { admins: [], members: [] };
+        matches.forEach(u => {
+          if (u.isAdmin) {
+            grouped.admins.push(u);
           } else {
-            card.removeAttribute('bookmarked');
+            grouped.members.push(u);
           }
+        });
+
+        let html = '';
+        if (grouped.admins.length > 0) {
+          html += `<div style="background: var(--bg-secondary); padding: 0.375rem 0.75rem; font-size: 0.6875rem; font-weight: 800; color: var(--color-danger); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--color-border); border-top: 1px solid var(--color-border);">⚓ Harbor Support Team</div>`;
+          html += grouped.admins.map(u => `
+            <div class="search-item" style="padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border); cursor: pointer; transition: background 0.15s; display: flex; align-items: center; gap: 0.5rem;" data-user-uid="${u.id}">
+              <span style="font-size: 1.25rem;">${u.avatar || '👤'}</span>
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 700; font-size: 0.8125rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.name || 'Friend'}</div>
+                <div style="font-size: 0.6875rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.bio || ''}</div>
+              </div>
+            </div>
+          `).join('');
         }
-      });
-    }));
-    registerPageSubscription(subscribe('language', () => {
-      if (detectCurrentPageKey() !== 'feed') return;
-      setPageText('hero-heading', `⚓ ${t('feed_hero_heading', 'Welcome to The Harbor')}`);
-      setPageText('hero-tagline', t('feed_hero_tagline', 'A safe place to share, heal, and grow — together.'));
-      setPagePlaceholder('search-stories', "Search stories");
-      setPagePlaceholder('search-members', "Search members");
+        if (grouped.members.length > 0) {
+          html += `<div style="background: var(--bg-secondary); padding: 0.375rem 0.75rem; font-size: 0.6875rem; font-weight: 800; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--color-border); border-top: 1px solid var(--color-border);">🌊 Community Members</div>`;
+          html += grouped.members.map(u => `
+            <div class="search-item" style="padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border); cursor: pointer; transition: background 0.15s; display: flex; align-items: center; gap: 0.5rem;" data-user-uid="${u.id}">
+              <span style="font-size: 1.25rem;">${u.avatar || '👤'}</span>
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 700; font-size: 0.8125rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.name || 'Friend'}</div>
+                <div style="font-size: 0.6875rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${u.bio || ''}</div>
+              </div>
+            </div>
+          `).join('');
+        }
+
+        membersDropdown.innerHTML = html;
+
+        membersDropdown.querySelectorAll('[data-user-uid]').forEach(item => {
+          item.addEventListener('click', () => {
+            const uid = item.dataset.userUid;
+            if (uid) {
+              membersDropdown.style.display = 'none';
+              if (searchMembersInput) searchMembersInput.value = '';
+              navigateTo(`profile`, { uid });
+            }
+          });
+        });
+      }
+      membersDropdown.style.display = 'block';
+    }
+  }, 400);
+
+  searchStoriesInput?.addEventListener('input', (e) => handleStoriesSearch(e.target.value));
+  searchMembersInput?.addEventListener('input', (e) => handleMembersSearch(e.target.value));
+
+  const onDocClick = (e) => {
+    if (storiesDropdown && !searchStoriesInput?.contains(e.target) && !storiesDropdown.contains(e.target)) {
+      storiesDropdown.style.display = 'none';
+    }
+    if (membersDropdown && !searchMembersInput?.contains(e.target) && !membersDropdown.contains(e.target)) {
+      membersDropdown.style.display = 'none';
+    }
+  };
+  document.addEventListener('click', onDocClick);
+  registerPageCleanup(() => document.removeEventListener('click', onDocClick));
+
+  pageEl('load-more-btn')?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); fetchStories(true); });
+  initBugReport();
+
+  // 🔥 Subscriptions: Only set up once.
+  const unsub1 = subscribe('authLoading', () => {
+    if (detectCurrentPageKey() !== 'feed') return;
+    const { authLoading, user, userData } = getState();
+    if (!authLoading && !user) navigateTo('welcome');
+    if (!authLoading && user) {
+      if (userData?.gender === '🧔 Man' && activeCategory === 'all' && !sessionStorage.getItem('feed_active_category')) {
+        activeCategory = 'men';
+        setFeedCategory('men');
+      }
+      if (userData?.gender === '👩 Woman' && activeCategory === 'all' && !sessionStorage.getItem('feed_active_category')) {
+        activeCategory = 'women';
+        setFeedCategory('women');
+      }
       renderTabs();
-    }));
+      loadUserReactions().then(() => fetchStories());
+    }
+  });
+
+  const unsub2 = subscribe('userData', () => { if (detectCurrentPageKey() === 'feed') renderTabs(); });
+  const unsub3 = subscribe('bookmarks', () => {
+    if (detectCurrentPageKey() !== 'feed') return;
+    const { bookmarks } = getState();
+    const cards = document.querySelectorAll('app-story-card');
+    cards.forEach(card => {
+      const id = card.getAttribute('story-id');
+      if (id) {
+        if (bookmarks?.includes(id)) {
+          card.setAttribute('bookmarked', '');
+        } else {
+          card.removeAttribute('bookmarked');
+        }
+      }
+    });
+  });
+  const unsub4 = subscribe('language', () => {
+    if (detectCurrentPageKey() !== 'feed') return;
+    setPageText('hero-heading', `⚓ ${t('feed_hero_heading', 'Welcome to The Harbor')}`);
+    setPageText('hero-tagline', t('feed_hero_tagline', 'A safe place to share, heal, and grow — together.'));
+    setPagePlaceholder('search-stories', "Search stories");
+    setPagePlaceholder('search-members', "Search members");
+    renderTabs();
+  });
+
+  registerPageSubscription(unsub1);
+  registerPageSubscription(unsub2);
+  registerPageSubscription(unsub3);
+  registerPageSubscription(unsub4);
 
   if (!getState().authLoading && getState().user) {
     renderTabs();
@@ -776,5 +839,3 @@ function init() {
 }
 
 onPageEnter('feed', init);
-
-export { REACTION_EMOJIS };
