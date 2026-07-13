@@ -1,26 +1,40 @@
 /**
  * Admin bugs page — bug management & public changelog
+ * Refactored with persistent shell – no flicker.
  */
 import { getState, showToast, showConfirm, navigateTo } from '../store.js';
 import { db, doc, updateDoc, collection, runTransaction } from '../firebase.js';
 import { getDocs, getDoc } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
 import { initBugReport } from '../page-common.js';
 import { guardAuth } from './shared.js';
+import { detectCurrentPageKey, registerPageSubscription, onPageEnter } from '../router.js';
+import { createPageShell } from '../utils/page-shell.js';
 
 let bugs = [];
 let notes = {};
 let loading = true;
 
+// 🔥 Persistent shell & fetch locks
+let _mounted = false;
+let _fetching = false;
+let pageShell = null;
+
 function el(id) { return document.getElementById(id); }
 function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
 
 function render() {
+  const container = el('bugs-dynamic-content');
+  if (!container) return;
+
   const { userData } = getState();
   const isAdmin = userData?.isAdmin;
   const visible = isAdmin ? bugs : bugs.filter(b => b.published);
-  const root = el('bugs-root');
 
-  if (loading) { root.innerHTML = '<div class="page-skeleton"></div><div class="page-skeleton"></div>'; return; }
+  // Show loading skeleton
+  if (loading) {
+    container.innerHTML = '<div class="page-skeleton"></div><div class="page-skeleton"></div>';
+    return;
+  }
 
   const pendingCount = bugs.filter(b => b.status === 'pending').length;
   const inProgressCount = bugs.filter(b => b.status === 'in-progress').length;
@@ -48,7 +62,7 @@ function render() {
     </div>
   ` : '';
 
-  root.innerHTML = `
+  container.innerHTML = `
     <button class="page-back" id="back-btn">${isAdmin ? '← Back to Admin Control' : '← Back to Feed'}</button>
     <div class="page-header" style="margin-bottom:var(--space-md)">
       <h1 style="font-size:var(--text-xl);font-weight:900;display:flex;align-items:center;gap:0.5rem">
@@ -65,7 +79,10 @@ function render() {
       ${visible.length ? visible.map(b => renderBugCard(b, isAdmin)).join('') : '<div class="page-empty card">⛵ No reported bug logs found.</div>'}
     </div>`;
 
-  el('back-btn').addEventListener('click', () => navigateTo(isAdmin ? 'admin' : 'feed'));
+  // Bind back button
+  document.getElementById('back-btn')?.addEventListener('click', () => navigateTo(isAdmin ? 'admin' : 'feed'));
+  
+  // Bind admin actions if admin
   if (isAdmin) wireAdminActions();
 }
 
@@ -169,6 +186,9 @@ function handlePublishFix(bug) {
 }
 
 async function loadBugs() {
+  if (_fetching) return;
+  _fetching = true;
+  
   loading = true;
   render();
   try {
@@ -179,13 +199,32 @@ async function loadBugs() {
   } catch (err) { showToast(`❌ Failed to load bugs: ${err.message}`, 'error'); }
   loading = false;
   render();
+  _fetching = false;
 }
 
 function init() {
+  if (_mounted) return;
+  _mounted = true;
+
+  // Build persistent shell
+  if (!pageShell) {
+    pageShell = createPageShell('bugs-root', `
+      <div id="bugs-dynamic-content" class="page-content"></div>
+    `);
+  }
+
   initBugReport();
   const { user } = getState();
   if (user) localStorage.setItem(`last_viewed_bug_fix_${user.uid}`, new Date().toISOString());
+  
+  // Subscribe to auth changes to reload if needed
+  const unsub = registerPageSubscription(() => {
+    if (detectCurrentPageKey() === 'admin-bugs') {
+      loadBugs();
+    }
+  });
+  
   loadBugs();
 }
 
-guardAuth(init, 'admin-bugs');
+onPageEnter('admin-bugs', init);
