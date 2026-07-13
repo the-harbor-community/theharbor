@@ -1,12 +1,14 @@
 /**
  * Admin moderation panel
+ * Refactored with persistent shell – no flicker.
  */
 import { getState, showToast, showConfirm, navigateTo, subscribe } from '../store.js';
 import { db, doc, updateDoc, collection, runTransaction } from '../firebase.js';
 import { getDocs, query, where, deleteDoc } from 'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js';
 import { initBugReport } from '../page-common.js';
 import { guardAuth } from './shared.js';
-import { detectCurrentPageKey, registerPageSubscription } from '../router.js';
+import { detectCurrentPageKey, registerPageSubscription, registerPageCleanup, onPageEnter } from '../router.js';
+import { createPageShell } from '../utils/page-shell.js';
 
 let reports = [];
 let pendingStories = [];
@@ -16,19 +18,46 @@ let pendingDonations = [];
 let activeReportTab = 'content';
 let loading = true;
 
+// 🔥 Persistent shell & fetch locks
+let _mounted = false;
+let _fetching = false;
+let pageShell = null;
+
 function el(id) { return document.getElementById(id); }
 function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
 
 function render() {
+  const container = el('admin-dynamic-content');
+  if (!container) return;
+
   const root = el('admin-root');
-  if (loading) { root.innerHTML = '<div class="page-skeleton"></div><div class="page-skeleton"></div>'; return; }
+  const { userData } = getState();
+  const isAdmin = userData?.isAdmin;
+
+  // If not admin, show access denied
+  if (!isAdmin) {
+    container.innerHTML = `
+      <div class="page-error">⚠️ ${t('admin_access_denied', 'Access Denied')}
+        <p style="font-weight:normal;font-size:var(--text-xs);margin:0.5rem 0 1rem">${t('admin_no_privileges', 'You need admin privileges.')}</p>
+        <button class="btn btn--primary" id="back-feed">← Back to Feed</button>
+      </div>`;
+    document.getElementById('back-feed')?.addEventListener('click', () => navigateTo('feed'));
+    return;
+  }
+
+  // Show loading skeleton
+  if (loading) {
+    container.innerHTML = '<div class="page-skeleton"></div><div class="page-skeleton"></div>';
+    return;
+  }
 
   const contentReports = reports.filter(r => r.type !== 'profile');
   const profileReports = reports.filter(r => r.type === 'profile');
-  const filtered = activeReportTab === 'content' ? contentReports : activeReportTab === 'profile' ? profileReports : flaggedReports;
+  const filtered = activeReportTab === 'content' ? contentReports : activeReportTab === 'profile' ? profileReports : activeReportTab === 'automod' ? flaggedReports : activeReportTab === 'donations' ? pendingDonations : reports;
   const pendingDonationsCount = pendingDonations.filter(d => d.status === 'pending').length;
 
-  root.innerHTML = `
+  // Build the full content HTML
+  container.innerHTML = `
     <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:1rem;margin-bottom:var(--space-md)">
       <div>
         <h1 style="font-size:var(--text-xl);font-weight:900;display:flex;align-items:center;gap:0.5rem">👑 Admin Control Panel</h1>
@@ -83,7 +112,8 @@ function render() {
       <div id="pending-list">${renderPending()}</div>
     </section>`;
 
-  el('goto-bugs').addEventListener('click', () => navigateTo('admin-bugs'));
+  // Bind events
+  document.getElementById('goto-bugs')?.addEventListener('click', () => navigateTo('admin-bugs'));
   document.querySelectorAll('[data-tab]').forEach(btn => btn.addEventListener('click', () => { activeReportTab = btn.dataset.tab; render(); }));
   wireReportButtons();
   wirePendingButtons();
@@ -197,7 +227,6 @@ function wireReportButtons() {
     btn.addEventListener('click', () => handleDeleteAutoMod(btn.dataset.automodDelete));
   });
 
-  // Donations Approvals Queue
   document.querySelectorAll('[data-donate-approve]').forEach(btn => {
     btn.addEventListener('click', () => handleApproveDonation(btn.dataset.donateApprove));
   });
@@ -208,7 +237,6 @@ function wireReportButtons() {
     btn.addEventListener('click', () => handleDeleteDonation(btn.dataset.donateDelete));
   });
   
-  // Intelligence Matrix Batch Macro Actions
   document.querySelectorAll('[data-batch-dismiss]').forEach(btn => {
     btn.addEventListener('click', () => {
       const key = btn.dataset.batchDismiss;
@@ -348,11 +376,9 @@ async function handleApproveStory(storyId) {
   } catch (err) { showToast(`❌ Approval failed: ${err.message}`, 'error'); }
 }
 
-// 🧠 Advanced Intelligence Matrix: Clustering & Anomaly Detection Utilities
 function computeClusters() {
   const reportClusters = {};
   reports.forEach(r => {
-    // Cluster content reports by reportedId (the entity under report) or reason
     const key = r.reportedId || r.reason || 'unknown';
     if (!reportClusters[key]) reportClusters[key] = [];
     reportClusters[key].push(r);
@@ -360,7 +386,6 @@ function computeClusters() {
 
   const bugClusters = {};
   bugs.forEach(b => {
-    // Clean up description to cluster duplicate/similar bug reports
     const cleaned = (b.description || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim().slice(0, 40);
     if (cleaned) {
       if (!bugClusters[cleaned]) bugClusters[cleaned] = [];
@@ -374,7 +399,6 @@ function computeClusters() {
 function detectAnomalies() {
   const anomalies = [];
   
-  // 1. Check for submission bursts (reporter flooding flags)
   const reporterCounts = {};
   reports.forEach(r => {
     if (r.reporterId) {
@@ -391,7 +415,6 @@ function detectAnomalies() {
     }
   });
 
-  // 2. Check for duplicate bugs outbreak
   const { bugClusters } = computeClusters();
   Object.keys(bugClusters).forEach(key => {
     if (bugClusters[key].length >= 3) {
@@ -402,7 +425,6 @@ function detectAnomalies() {
     }
   });
 
-  // 3. Check for heavy profile violations
   const profileReports = reports.filter(r => r.type === 'profile');
   const profileCounts = {};
   profileReports.forEach(r => {
@@ -445,7 +467,6 @@ function renderIntelligenceMatrix() {
     `;
   }
 
-  // Render Clustered Content Reports
   const clusterKeys = Object.keys(reportClusters);
   let clustersHtml = '';
   if (clusterKeys.length === 0) {
@@ -488,7 +509,6 @@ function renderIntelligenceMatrix() {
             </table>
           </div>
           
-          <!-- One-Click Batch Triage Macros -->
           <div style="display:flex; gap:0.5rem; flex-wrap:wrap; padding-top:0.75rem; border-top:1px solid var(--color-border)">
             <button class="btn btn--secondary" style="font-size:0.625rem; padding:0.25rem 0.5rem" data-batch-dismiss="${key}">⚖️ Batch Dismiss</button>
             <button class="btn btn--danger" style="font-size:0.625rem; padding:0.25rem 0.5rem" data-batch-delete="${key}">🗑️ Group Flag & Purge</button>
@@ -499,7 +519,6 @@ function renderIntelligenceMatrix() {
     }).join('');
   }
 
-  // Render Clustered Bug Reports
   const bugClusterKeys = Object.keys(bugClusters);
   let bugClustersHtml = '';
   if (bugClusterKeys.length === 0) {
@@ -542,7 +561,6 @@ function renderIntelligenceMatrix() {
   `;
 }
 
-// Batch processing macros implementations
 async function handleBatchDismiss(clusterItems) {
   if (!clusterItems.length) return;
   showConfirm('⚖️ Batch Dismiss Cluster', `Are you sure you want to dismiss all ${clusterItems.length} reports in this cluster?`, false, async () => {
@@ -712,16 +730,20 @@ async function handleDeleteDonation(id) {
 }
 
 async function loadAdminData() {
+  if (_fetching) return;
+  _fetching = true;
+
   const { userData } = getState();
-  if (!userData?.isAdmin) { navigateTo('feed'); return; }
+  if (!userData?.isAdmin) { navigateTo('feed'); _fetching = false; return; }
+  
   loading = true;
   render();
+
   try {
     const reportsSnap = await getDocs(query(collection(db, 'reports'), where('status', '==', 'pending')));
     reports = [];
     reportsSnap.forEach(d => reports.push({ id: d.id, ...d.data() }));
 
-    // Fetch flaggedReports
     const flaggedSnap = await getDocs(query(collection(db, 'flaggedReports')));
     flaggedReports = [];
     flaggedSnap.forEach(d => flaggedReports.push({ id: d.id, ...d.data() }));
@@ -730,34 +752,45 @@ async function loadAdminData() {
     pendingStories = [];
     pendingSnap.forEach(d => pendingStories.push({ id: d.id, ...d.data() }));
 
-    // Fetch bug logs for clustering
     const bugsSnap = await getDocs(collection(db, 'bugs'));
     bugs = [];
     bugsSnap.forEach(d => bugs.push({ id: d.id, ...d.data() }));
 
-    // Fetch Donations Logs
     const donationsSnap = await getDocs(collection(db, 'donations'));
     pendingDonations = [];
     donationsSnap.forEach(d => pendingDonations.push({ id: d.id, ...d.data() }));
-    // Sort so pending ones are first, then approved, then rejected, then sort by timestamp descending
     pendingDonations.sort((a, b) => {
       if (a.status === 'pending' && b.status !== 'pending') return -1;
       if (a.status !== 'pending' && b.status === 'pending') return 1;
       return new Date(b.timestamp) - new Date(a.timestamp);
     });
   } catch (err) { showToast(`❌ Failed to load admin dashboard: ${err.message}`, 'error'); }
+  
   loading = false;
   render();
+  _fetching = false;
 }
 
 function init() {
+  if (_mounted) return;
+  _mounted = true;
+
+  // Build persistent shell
+  if (!pageShell) {
+    pageShell = createPageShell('admin-root', `
+      <div id="admin-dynamic-content" class="page-content"></div>
+    `);
+  }
+
   initBugReport();
+  
   const unsub = subscribe('userData', () => {
     if (detectCurrentPageKey() !== 'admin') return;
     if (!getState().userData?.isAdmin && !getState().authLoading) navigateTo('feed');
   });
   registerPageSubscription(unsub);
+  
   loadAdminData();
 }
 
-guardAuth(init, 'admin');
+onPageEnter('admin', init);
