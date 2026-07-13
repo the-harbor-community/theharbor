@@ -1,10 +1,5 @@
 /**
- * Production Readiness & Security Certification Rating
- * Score: 100/100 | Verified Secure, Bulletproof State Flow & Premium UI
- */
-
-/**
- * Reusable Story Card Web Component
+ * Reusable Story Card Web Component – Optimised for zero flicker
  */
 import { escapeHtml, REACTION_EMOJIS, highlightVulgarWords } from '../utils.js';
 import { navigateTo, captureFeedState, t } from '../store.js';
@@ -72,7 +67,7 @@ template.innerHTML = `
   .category { align-self: flex-start; font-size: 0.725rem; font-weight: 700; text-transform: uppercase; background: var(--bg-secondary); border: 1px solid var(--color-border); padding: 0.125rem 0.5rem; border-radius: var(--radius-full); color: var(--text-secondary); }
   .excerpt { font-size: var(--text-xs); color: var(--text-secondary); line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; margin: 0; }
   .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: space-between; padding-top: 0.75rem; border-top: 1px solid var(--color-border); }
-  .reaction-row { display: flex; flex-wrap: nowrap; gap: 0.375rem; align-items: center; animation: rowEnter 0.35s cubic-bezier(0.4, 0, 0.2, 1); flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .reaction-row { display: flex; flex-wrap: nowrap; gap: 0.375rem; align-items: center; flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .reaction-row::-webkit-scrollbar { display: none; }
   .reaction-row { -ms-overflow-style: none; scrollbar-width: none; }
   .reactions { display: flex; flex-wrap: nowrap; gap: 0.25rem; border: none !important; }
@@ -148,6 +143,7 @@ class AppStoryCard extends HTMLElement {
     this._userReactions = [];
     this._handlersBound = false;
     this._handleArticleClick = this._handleArticleClick.bind(this);
+    this._built = false;
   }
 
   setNavigateHandler(fn, activeCategory = 'all') {
@@ -160,7 +156,12 @@ class AppStoryCard extends HTMLElement {
       this._article.addEventListener('click', this._handleArticleClick);
       this._handlersBound = true;
     }
-    this._render();
+    if (!this._built) {
+      this._build();
+      this._built = true;
+    } else {
+      this._updateAllAttributes();
+    }
   }
 
   disconnectedCallback() {
@@ -168,27 +169,159 @@ class AppStoryCard extends HTMLElement {
     this._handlersBound = false;
   }
 
-  attributeChangedCallback(name, oldVal, newVal) {
-    if (oldVal === newVal) return;
-    if (name === 'views' && oldVal !== null) {
-      const oldNum = parseInt(oldVal || '0', 10);
-      const newNum = parseInt(newVal || '0', 10);
-      if (oldNum !== newNum) {
-        this._animateViewsUpdate();
-      }
-    }
-    this._render();
+  _build() {
+    const id = this.getAttribute('story-id') || '';
+    const authorId = this._getAuthorId();
+    const title = this.getAttribute('title') || t('untitled', 'Untitled');
+    const text = this.getAttribute('text') || '';
+    const author = this.getAttribute('author') || t('anonymous', 'Anonymous');
+    const category = this.getAttribute('category') || '';
+    const date = this.getAttribute('date') || t('recently', 'Recently');
+    const isAnon = this.hasAttribute('anonymous');
+    const gold = parseInt(this.getAttribute('gold') || '0', 10);
+    const comments = this.getAttribute('comments') || '0';
+    const views = parseInt(this.getAttribute('views') || '0', 10);
+    const highlighted = this.hasAttribute('highlighted');
+    const isBookmarked = this.hasAttribute('bookmarked');
+
+    const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+    const minRead = Math.max(1, Math.round(wordCount / 200));
+    const readingTime = `${minRead} ${t('min_read', 'min read')}`;
+
+    this._article.className = highlighted ? 'highlighted' : '';
+    this._article.id = id ? `story-${id}` : '';
+
+    const avatarCls = isAnon ? 'avatar avatar--static' : 'avatar avatar--clickable';
+    const authorAvatar = this.getAttribute('author-avatar') || '👤';
+    const avatarEl = isAnon
+      ? `<div class="${avatarCls}" aria-hidden="true">🕊️</div>`
+      : `<button type="button" class="${avatarCls} profile-avatar-link" data-action="profile" data-uid="${escapeHtml(authorId)}" aria-label="${t('view_profile', 'View profile')}">${escapeHtml(authorAvatar)}</button>`;
+
+    this._article.innerHTML = `
+      ${gold > 0 ? `<div class="gold-badge" id="gold-badge">🪙 ${gold} GOLD</div>` : ''}
+      <button type="button" class="bookmark-tag ${isBookmarked ? 'active' : ''}" data-action="bookmark" title="${t('bookmark', 'Bookmark')}">🔖</button>
+      <div class="header">
+        <div class="author">
+          ${avatarEl}
+          <div>
+            <strong style="font-size:var(--text-sm)">${isAnon ? `🕊️ ${t('anonymous', 'Anonymous')}` : escapeHtml(author)}</strong><br>
+            <span style="font-size:0.75rem;color:var(--text-secondary);font-weight:500;">${escapeHtml(date)} · ⏱️ ${readingTime}</span>
+            <span class="views-badge" id="views-badge" title="${views} views">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <span id="views-count">${views}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="title" data-action="read">${highlightVulgarWords(escapeHtml(title))}</button>
+      <span class="category">${escapeHtml(category)}</span>
+      <p class="excerpt">${highlightVulgarWords(escapeHtml(text))}</p>
+      <button type="button" class="btn-sm" data-action="read" style="align-self:flex-start;background:none;border:none;color:var(--color-secondary);font-weight:700">${t('read_more', 'Read More ▼')}</button>
+      <div class="actions">
+        <div class="reaction-row">
+          <div class="reactions" id="reactions"></div>
+        </div>
+        <div class="meta-btns">
+          <button type="button" class="btn-sm btn-gold donate-btn" data-action="gold" title="${t('donate', 'Donate')}">🪙</button>
+          <button type="button" class="btn-sm" data-action="comments" id="comments-badge">💬 ${comments}</button>
+        </div>
+      </div>`;
+
+    this._elements = {
+      goldBadge: this._article.querySelector('.gold-badge'),
+      viewsBadge: this._article.querySelector('#views-badge'),
+      viewsCount: this._article.querySelector('#views-count'),
+      commentsBadge: this._article.querySelector('#comments-badge'),
+      reactionsContainer: this._article.querySelector('#reactions'),
+      bookmarkBtn: this._article.querySelector('.bookmark-tag'),
+    };
+
+    this._paintReactions();
   }
 
-  _animateViewsUpdate() {
-    requestAnimationFrame(() => {
-      const badge = this.shadowRoot.getElementById('views-badge');
-      if (badge) {
-        badge.classList.remove('pulse-active');
-        void badge.offsetWidth; // force reflow
-        badge.classList.add('pulse-active');
+  _updateAttribute(name, value) {
+    const el = this._elements;
+    if (!el) return;
+
+    if (name === 'gold' && el.goldBadge) {
+      const num = parseInt(value) || 0;
+      el.goldBadge.textContent = `🪙 ${num} GOLD`;
+    }
+    if (name === 'comments' && el.commentsBadge) {
+      el.commentsBadge.textContent = `💬 ${value}`;
+    }
+    if (name === 'views' && el.viewsCount) {
+      el.viewsCount.textContent = value;
+      if (el.viewsBadge) {
+        el.viewsBadge.classList.remove('pulse-active');
+        void el.viewsBadge.offsetWidth;
+        el.viewsBadge.classList.add('pulse-active');
+      }
+    }
+    if (name === 'bookmarked' && el.bookmarkBtn) {
+      const isBookmarked = this.hasAttribute('bookmarked');
+      el.bookmarkBtn.classList.toggle('active', isBookmarked);
+    }
+    if (name === 'highlighted') {
+      this._article.classList.toggle('highlighted', this.hasAttribute('highlighted'));
+    }
+  }
+
+  _updateAllAttributes() {
+    const attrs = AppStoryCard.observedAttributes;
+    attrs.forEach(name => {
+      const value = this.getAttribute(name);
+      if (value !== null) {
+        this._updateAttribute(name, value);
       }
     });
+  }
+
+  attributeChangedCallback(name, oldVal, newVal) {
+    if (oldVal === newVal) return;
+    this._updateAttribute(name, newVal);
+  }
+
+  _paintReactions() {
+    const container = this._elements?.reactionsContainer;
+    if (!container) return;
+
+    if (container.children.length === 0) {
+      REACTION_EMOJIS.forEach(emoji => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'react-btn';
+        btn.dataset.emoji = emoji;
+        btn.innerHTML = `${emoji} <strong>0</strong>`;
+        container.appendChild(btn);
+      });
+    }
+
+    const buttons = container.querySelectorAll('.react-btn');
+    buttons.forEach((btn, index) => {
+      const emoji = REACTION_EMOJIS[index];
+      const count = this._reactions?.[emoji] || 0;
+      const active = this._userReactions?.includes(emoji);
+      btn.className = `react-btn${active ? ' active' : ''}`;
+      btn.innerHTML = `${emoji} <strong>${count}</strong>`;
+    });
+  }
+
+  setReactions(reactions, userReactions, onReact) {
+    this._reactions = reactions || {};
+    this._userReactions = userReactions || [];
+    this._onReact = onReact;
+    this._paintReactions();
+  }
+
+  showGoldButton(show) {
+    const btn = this._article?.querySelector('[data-action="gold"]');
+    if (btn) {
+      btn.style.display = show ? '' : 'none';
+    }
   }
 
   _getAuthorId() {
@@ -246,107 +379,6 @@ class AppStoryCard extends HTMLElement {
         composed: true,
         detail: { id, isBookmarked: !isBookmarked }
       }));
-    }
-  }
-
-  _paintReactions() {
-    const container = this.shadowRoot.querySelector('#reactions');
-    if (!container) return;
-    container.innerHTML = REACTION_EMOJIS.map(emoji => {
-      const count = this._reactions?.[emoji] || 0;
-      const active = this._userReactions?.includes(emoji);
-      const loveCls = (emoji === '❤️' || emoji === '🥰' || emoji === '💕') ? ' reaction-love' : '';
-      return `<button type="button" class="react-btn${loveCls}${active ? ' active' : ''}" data-emoji="${emoji}">${emoji} <strong>${count}</strong></button>`;
-    }).join('');
-  }
-
-  _render() {
-    const savedOnReact = this._onReact;
-    const savedReactions = this._reactions;
-    const savedUserReactions = this._userReactions;
-    const id = this.getAttribute('story-id') || '';
-    const authorId = this._getAuthorId();
-    const title = this.getAttribute('title') || t('untitled', 'Untitled');
-    const text = this.getAttribute('text') || '';
-    const author = this.getAttribute('author') || t('anonymous', 'Anonymous');
-    const category = this.getAttribute('category') || '';
-    const date = this.getAttribute('date') || t('recently', 'Recently');
-    const isAnon = this.hasAttribute('anonymous');
-    const gold = parseInt(this.getAttribute('gold') || '0', 10);
-    const comments = this.getAttribute('comments') || '0';
-    const views = parseInt(this.getAttribute('views') || '0', 10);
-    const highlighted = this.hasAttribute('highlighted');
-
-    // Calculate reading time based on 200 words per minute speed
-    const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
-    const minRead = Math.max(1, Math.round(wordCount / 200));
-    const readingTime = `${minRead} ${t('min_read', 'min read')}`;
-
-    this._article.className = highlighted ? 'highlighted' : '';
-    this._article.id = id ? `story-${id}` : '';
-
-    const avatarCls = isAnon ? 'avatar avatar--static' : 'avatar avatar--clickable';
-    const authorAvatar = this.getAttribute('author-avatar') || '👤';
-    const avatarEl = isAnon
-      ? `<div class="${avatarCls}" aria-hidden="true">🕊️</div>`
-      : `<button type="button" class="${avatarCls} profile-avatar-link" data-action="profile" data-uid="${escapeHtml(authorId)}" aria-label="${t('view_profile', 'View profile')}">${escapeHtml(authorAvatar)}</button>`;
-
-    const isBookmarked = this.hasAttribute('bookmarked');
-
-    this._article.innerHTML = `
-      ${gold > 0 ? `<div class="gold-badge">🪙 ${gold} GOLD</div>` : ''}
-      <button type="button" class="bookmark-tag ${isBookmarked ? 'active' : ''}" data-action="bookmark" title="${t('bookmark', 'Bookmark')}">🔖</button>
-      <div class="header">
-        <div class="author">
-          ${avatarEl}
-          <div>
-            <strong style="font-size:var(--text-sm)">${isAnon ? `🕊️ ${t('anonymous', 'Anonymous')}` : escapeHtml(author)}</strong><br>
-            <span style="font-size:0.75rem;color:var(--text-secondary);font-weight:500;">${escapeHtml(date)} · ⏱️ ${readingTime}</span>
-            <span class="views-badge" id="views-badge" title="${views} views">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                <circle cx="12" cy="12" r="3"/>
-              </svg>
-              <span id="views-count">${views}</span>
-            </span>
-          </div>
-        </div>
-      </div>
-      <button type="button" class="title" data-action="read">${highlightVulgarWords(escapeHtml(title))}</button>
-      <span class="category">${escapeHtml(category)}</span>
-      <p class="excerpt">${highlightVulgarWords(escapeHtml(text))}</p>
-      <button type="button" class="btn-sm" data-action="read" style="align-self:flex-start;background:none;border:none;color:var(--color-secondary);font-weight:700">${t('read_more', 'Read More ▼')}</button>
-      <div class="actions">
-        <div class="reaction-row">
-          <div class="reactions" id="reactions"></div>
-        </div>
-        <div class="meta-btns">
-          <button type="button" class="btn-sm btn-gold donate-btn" data-action="gold" title="${t('donate', 'Donate')}">🪙</button>
-          <button type="button" class="btn-sm" data-action="comments">💬 ${comments}</button>
-        </div>
-      </div>`;
-
-    this._paintReactions();
-    if (savedOnReact) {
-      this._onReact = savedOnReact;
-      this._reactions = savedReactions;
-      this._userReactions = savedUserReactions;
-    }
-    this.dispatchEvent(new CustomEvent('story-card-ready', { bubbles: true, detail: { id, article: this._article } }));
-  }
-
-  setReactions(reactions, userReactions, onReact) {
-    this._reactions = reactions || {};
-    this._userReactions = userReactions || [];
-    this._onReact = onReact;
-    this._paintReactions();
-  }
-
-  showGoldButton(show) {
-    const btn = this.shadowRoot.querySelector('[data-action="gold"]');
-    if (btn) {
-      btn.hidden = !show;
-      btn.style.display = show ? '' : 'none';
     }
   }
 }
